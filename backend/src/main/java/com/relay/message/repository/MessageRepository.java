@@ -11,11 +11,11 @@ import java.util.UUID;
 
 public interface MessageRepository extends JpaRepository<Message, UUID> {
 
-    @Query("SELECT m FROM Message m WHERE m.conversation.id = :conversationId " +
+    @Query("SELECT m FROM Message m JOIN FETCH m.sender WHERE m.conversation.id = :conversationId " +
            "AND m.deletedAt IS NULL ORDER BY m.sequenceNumber DESC")
     List<Message> findByConversationId(UUID conversationId, Pageable pageable);
 
-    @Query("SELECT m FROM Message m WHERE m.conversation.id = :conversationId " +
+    @Query("SELECT m FROM Message m JOIN FETCH m.sender WHERE m.conversation.id = :conversationId " +
            "AND m.sequenceNumber < :beforeSequence AND m.deletedAt IS NULL " +
            "ORDER BY m.sequenceNumber DESC")
     List<Message> findByConversationIdBefore(UUID conversationId, Long beforeSequence, Pageable pageable);

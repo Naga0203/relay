@@ -19,6 +19,7 @@ public class UserService {
 
     private final UserRepository userRepository;
 
+    @Transactional(readOnly = true)
     public UserResponse getUserById(UUID id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> ApiException.notFound("User", id));
@@ -44,6 +45,7 @@ public class UserService {
         return UserResponse.from(user);
     }
 
+    @Transactional(readOnly = true)
     public List<UserResponse> searchUsers(String query) {
         return userRepository.searchByNameOrEmail(query).stream()
                 .map(UserResponse::from)

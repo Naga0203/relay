@@ -69,12 +69,14 @@ public class ConversationService {
         return ConversationResponse.from(conversation);
     }
 
+    @Transactional(readOnly = true)
     public List<ConversationResponse> getUserConversations(UserPrincipal principal) {
         return conversationRepository.findAllByUserId(principal.getId()).stream()
                 .map(ConversationResponse::from)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public ConversationResponse getConversation(UserPrincipal principal, UUID conversationId) {
         Conversation conversation = getConversationAndVerifyMembership(conversationId, principal.getId());
         return ConversationResponse.from(conversation);

@@ -9,10 +9,10 @@ import java.util.UUID;
 
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
 
-    @Query("SELECT c FROM Conversation c JOIN c.members m WHERE m.userId = :userId ORDER BY c.updatedAt DESC")
+    @Query("SELECT DISTINCT c FROM Conversation c LEFT JOIN FETCH c.members m LEFT JOIN FETCH m.user WHERE c.id IN (SELECT cm.conversationId FROM ConversationMember cm WHERE cm.userId = :userId) ORDER BY c.updatedAt DESC")
     List<Conversation> findAllByUserId(UUID userId);
 
-    @Query("SELECT c FROM Conversation c JOIN c.members m1 JOIN c.members m2 " +
-           "WHERE c.type = 'DIRECT' AND m1.userId = :userId1 AND m2.userId = :userId2")
+    @Query("SELECT DISTINCT c FROM Conversation c JOIN c.members m1 JOIN c.members m2 " +
+           "WHERE c.type = com.relay.conversation.entity.Conversation.ConversationType.DIRECT AND m1.userId = :userId1 AND m2.userId = :userId2")
     List<Conversation> findDirectConversation(UUID userId1, UUID userId2);
 }

@@ -80,6 +80,7 @@ public class MessageService {
         return MessageResponse.from(message);
     }
 
+    @Transactional(readOnly = true)
     public MessagePage getMessages(UserPrincipal principal, UUID conversationId, Long beforeSequence, int limit) {
         if (!memberRepository.existsByConversationIdAndUserId(conversationId, principal.getId())) {
             throw ApiException.forbidden("You are not a member of this conversation");
@@ -145,6 +146,7 @@ public class MessageService {
         log.info("Message soft-deleted: {}", messageId);
     }
 
+    @Transactional(readOnly = true)
     public List<MessageResponse> searchMessages(UserPrincipal principal, UUID conversationId, String query) {
         if (!memberRepository.existsByConversationIdAndUserId(conversationId, principal.getId())) {
             throw ApiException.forbidden("You are not a member of this conversation");
