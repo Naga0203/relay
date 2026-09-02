@@ -1,5 +1,5 @@
 CREATE TABLE conversations (
-    id         UUID PRIMARY KEY DEFAULT random_uuid(),
+    id         UUID DEFAULT random_uuid() PRIMARY KEY,
     type       VARCHAR(10)  NOT NULL CHECK (type IN ('DIRECT', 'GROUP')),
     name       VARCHAR(100),
     avatar_url VARCHAR(500),

@@ -2,7 +2,7 @@
 CREATE SEQUENCE message_sequence_seq START WITH 1;
 
 CREATE TABLE messages (
-    id              UUID         PRIMARY KEY DEFAULT random_uuid(),
+    id              UUID         DEFAULT random_uuid() PRIMARY KEY,
     conversation_id UUID         NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id       UUID         NOT NULL REFERENCES users(id),
     content         TEXT,
@@ -22,7 +22,7 @@ CREATE INDEX idx_messages_idempotency ON messages(idempotency_key);
 
 -- Message reactions
 CREATE TABLE message_reactions (
-    id         UUID PRIMARY KEY DEFAULT random_uuid(),
+    id         UUID DEFAULT random_uuid() PRIMARY KEY,
     message_id UUID        NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     emoji      VARCHAR(20) NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE message_reactions (
 
 -- Message attachments
 CREATE TABLE message_attachments (
-    id           UUID PRIMARY KEY DEFAULT random_uuid(),
+    id           UUID DEFAULT random_uuid() PRIMARY KEY,
     message_id   UUID         NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     filename     VARCHAR(255) NOT NULL,
     content_type VARCHAR(100) NOT NULL,
