@@ -74,7 +74,7 @@ public class MessageService {
 
         // Update conversation's updatedAt
         conversation.setUpdatedAt(Instant.now());
-        conversationRepository.save(conversation);
+        conversationRepository.saveAndFlush(conversation);
 
         log.debug("Message sent: {} in conversation {}", message.getId(), conversationId);
         return MessageResponse.from(message);

@@ -21,22 +21,24 @@ public record MessageResponse(
         boolean deleted
 ) {
     public static MessageResponse from(Message msg) {
-        Instant created = msg.getCreatedAt() != null ? msg.getCreatedAt() : Instant.now();
-        Instant updated = msg.getUpdatedAt() != null ? msg.getUpdatedAt() : Instant.now();
+        Instant createdAt = msg.getCreatedAt() != null ? msg.getCreatedAt() : Instant.now();
+        Instant updatedAt = msg.getUpdatedAt() != null ? msg.getUpdatedAt() : Instant.now();
+        boolean edited = msg.getCreatedAt() != null && msg.getUpdatedAt() != null
+                && !msg.getCreatedAt().equals(msg.getUpdatedAt()) && !msg.isDeleted();
 
         return new MessageResponse(
                 msg.getId(),
-                msg.getConversation().getId(),
-                msg.getSender().getId(),
-                msg.getSender().getName(),
-                msg.getSender().getAvatarUrl(),
+                msg.getConversation() != null ? msg.getConversation().getId() : null,
+                msg.getSender() != null ? msg.getSender().getId() : null,
+                msg.getSender() != null ? msg.getSender().getName() : null,
+                msg.getSender() != null ? msg.getSender().getAvatarUrl() : null,
                 msg.isDeleted() ? null : msg.getContent(),
-                msg.getMessageType(),
+                msg.getMessageType() != null ? msg.getMessageType() : Message.MessageType.TEXT,
                 msg.getSequenceNumber(),
                 msg.getReplyTo() != null ? msg.getReplyTo().getId() : null,
-                created,
-                updated,
-                !created.equals(updated) && !msg.isDeleted(),
+                createdAt,
+                updatedAt,
+                edited,
                 msg.isDeleted()
         );
     }
