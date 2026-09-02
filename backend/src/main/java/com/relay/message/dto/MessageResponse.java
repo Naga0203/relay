@@ -21,6 +21,9 @@ public record MessageResponse(
         boolean deleted
 ) {
     public static MessageResponse from(Message msg) {
+        Instant created = msg.getCreatedAt() != null ? msg.getCreatedAt() : Instant.now();
+        Instant updated = msg.getUpdatedAt() != null ? msg.getUpdatedAt() : Instant.now();
+
         return new MessageResponse(
                 msg.getId(),
                 msg.getConversation().getId(),
@@ -31,9 +34,9 @@ public record MessageResponse(
                 msg.getMessageType(),
                 msg.getSequenceNumber(),
                 msg.getReplyTo() != null ? msg.getReplyTo().getId() : null,
-                msg.getCreatedAt(),
-                msg.getUpdatedAt(),
-                !msg.getCreatedAt().equals(msg.getUpdatedAt()) && !msg.isDeleted(),
+                created,
+                updated,
+                !created.equals(updated) && !msg.isDeleted(),
                 msg.isDeleted()
         );
     }

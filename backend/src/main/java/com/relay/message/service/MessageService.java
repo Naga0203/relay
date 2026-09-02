@@ -70,7 +70,7 @@ public class MessageService {
             message.setReplyTo(replyTo);
         }
 
-        message = messageRepository.save(message);
+        message = messageRepository.saveAndFlush(message);
 
         // Update conversation's updatedAt
         conversation.setUpdatedAt(Instant.now());
