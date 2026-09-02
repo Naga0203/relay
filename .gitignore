@@ -1,0 +1,25 @@
+# Maven build output
+**/target/
+*.class
+
+# Maven binaries
+**/.mvn_bin/
+
+# Node dependencies & frontend builds
+**/node_modules/
+**/dist/
+**/build/
+.npm
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.cls
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
