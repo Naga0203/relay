@@ -1,11 +1,13 @@
 package com.relay.message.controller;
 
 import com.relay.auth.security.UserPrincipal;
+import com.relay.message.dto.EditMessageRequest;
 import com.relay.message.dto.MessagePage;
 import com.relay.message.dto.MessageResponse;
 import com.relay.message.dto.SendMessageRequest;
 import com.relay.message.service.MessageService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +15,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -45,8 +46,8 @@ public class MessageController {
     public ResponseEntity<MessageResponse> editMessage(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID messageId,
-            @RequestBody Map<String, String> body) {
-        return ResponseEntity.ok(messageService.editMessage(principal, messageId, body.get("content")));
+            @Valid @RequestBody EditMessageRequest request) {
+        return ResponseEntity.ok(messageService.editMessage(principal, messageId, request.content()));
     }
 
     @DeleteMapping("/messages/{messageId}")
@@ -61,7 +62,7 @@ public class MessageController {
     public ResponseEntity<List<MessageResponse>> searchMessages(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID conversationId,
-            @RequestParam String q) {
+            @RequestParam @Size(min = 1, max = 200, message = "Search query must be 1-200 characters") String q) {
         return ResponseEntity.ok(messageService.searchMessages(principal, conversationId, q));
     }
 }

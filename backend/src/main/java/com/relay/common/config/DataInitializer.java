@@ -78,6 +78,6 @@ public class DataInitializer implements CommandLineRunner {
                 .role(ConversationMember.MemberRole.MEMBER)
                 .build());
 
-        log.info("Seeded users: alice@example.com and bob@example.com with password 'password123'");
+        log.info("Seeded users: alice@example.com and bob@example.com");
     }
 }

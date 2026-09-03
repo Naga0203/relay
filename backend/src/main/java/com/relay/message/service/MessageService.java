@@ -53,13 +53,14 @@ public class MessageService {
         User sender = userRepository.findById(principal.getId())
                 .orElseThrow(() -> ApiException.notFound("User", principal.getId()));
 
-        // Generate next sequence number (synchronized per conversation via DB)
-        Long nextSequence = messageRepository.findMaxSequenceNumber(conversationId) + 1;
+        // Generate next sequence number (pessimistic lock prevents race condition)
+        Long nextSequence = messageRepository.findMaxSequenceNumberForUpdate(conversationId) + 1;
 
         Message message = Message.builder()
                 .conversation(conversation)
                 .sender(sender)
                 .content(request.content())
+                .messageType(request.messageType() != null ? request.messageType() : Message.MessageType.TEXT)
                 .sequenceNumber(nextSequence)
                 .idempotencyKey(request.idempotencyKey())
                 .build();
@@ -67,6 +68,9 @@ public class MessageService {
         if (request.replyToId() != null) {
             Message replyTo = messageRepository.findById(request.replyToId())
                     .orElseThrow(() -> ApiException.notFound("Message", request.replyToId()));
+            if (!replyTo.getConversation().getId().equals(conversationId)) {
+                throw ApiException.badRequest("Reply-to message is not in this conversation");
+            }
             message.setReplyTo(replyTo);
         }
 
@@ -126,7 +130,6 @@ public class MessageService {
         }
 
         message.setContent(newContent);
-        message.setUpdatedAt(Instant.now());
         message = messageRepository.save(message);
 
         return MessageResponse.from(message);

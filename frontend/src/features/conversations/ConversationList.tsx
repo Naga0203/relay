@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useChatStore } from '../../stores/chatStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -18,6 +18,7 @@ export function ConversationList({ conversations, isLoading, activeId }: Props) 
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [searching, setSearching] = useState(false);
+  const [createError, setCreateError] = useState('');
   const setActive = useChatStore((s) => s.setActiveConversation);
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen);
   const currentUser = useAuthStore((s) => s.user);
@@ -33,8 +34,14 @@ export function ConversationList({ conversations, isLoading, activeId }: Props) 
       setSearch('');
       setSearchResults([]);
       setSidebarOpen(false);
+      setCreateError('');
+    },
+    onError: () => {
+      setCreateError('Failed to create conversation. Please try again.');
     },
   });
+
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleSearch = async (q: string) => {
     setSearch(q);
@@ -42,14 +49,23 @@ export function ConversationList({ conversations, isLoading, activeId }: Props) 
       setSearchResults([]);
       return;
     }
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setSearching(true);
     try {
-      const results = await userApi.search(q);
-      setSearchResults(results.filter((u) => u.id !== currentUser?.id));
+      const results = await userApi.search(q, controller.signal);
+      if (!controller.signal.aborted) {
+        setSearchResults(results.filter((u) => u.id !== currentUser?.id));
+      }
     } catch {
-      setSearchResults([]);
+      if (!controller.signal.aborted) {
+        setSearchResults([]);
+      }
     } finally {
-      setSearching(false);
+      if (!controller.signal.aborted) {
+        setSearching(false);
+      }
     }
   };
 
@@ -96,6 +112,12 @@ export function ConversationList({ conversations, isLoading, activeId }: Props) 
           {searching && (
             <div className="flex justify-center py-3">
               <Loader2 className="w-4 h-4 animate-spin text-dark-400" />
+            </div>
+          )}
+
+          {createError && (
+            <div className="bg-danger-500/10 border border-danger-500/30 text-danger-500 px-3 py-2 rounded-xl text-xs mt-2">
+              {createError}
             </div>
           )}
 

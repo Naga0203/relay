@@ -10,7 +10,7 @@ spring:
 
   h2:
     console:
-      enabled: true
+      enabled: false
       path: /h2-console
 
   jpa:
@@ -53,21 +53,23 @@ server:
 # JWT Configuration
 app:
   jwt:
-    secret: "your-256-bit-secret-key-change-in-production-please-make-it-long-enough"
+    secret: ${JWT_SECRET:change-me-in-production-secret-key-at-least-32-bytes-long}
     access-token-expiration-ms: 900000      # 15 minutes
     refresh-token-expiration-ms: 604800000   # 7 days
   cors:
     allowed-origins: "http://localhost:5173"
+  frontend-url: "http://localhost:5173"
+  h2-console-url: "http://localhost:8080/h2-console"
 
 # Actuator
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info
   endpoint:
     health:
-      show-details: always
+      show-details: when_authorized
 
 logging:
   level:
@@ -84,8 +86,8 @@ spring:
       on-profile: postgres
   datasource:
     url: jdbc:postgresql://localhost:5432/relay_chat
-    username: relay
-    password: relay_secret
+    username: ${DB_USERNAME:relay}
+    password: ${DB_PASSWORD:relay_secret}
     driver-class-name: org.postgresql.Driver
   jpa:
     properties:

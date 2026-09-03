@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { authApi } from './api';
 import { useAuthStore } from '../../stores/authStore';
 import { MessageSquare, Loader2, Eye, EyeOff } from 'lucide-react';
@@ -28,11 +29,13 @@ export function RegisterPage() {
       const res = await authApi.register({ name, email, password });
       login(res.accessToken, res.refreshToken, res.user);
       navigate('/');
-    } catch (err: any) {
-      const msg = err.response?.data?.message || err.response?.data?.errors
-        ? Object.values(err.response.data.errors as Record<string, string>).join('. ')
+    } catch (err: unknown) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || err.response?.data?.errors
+          ? Object.values(err.response.data.errors as Record<string, string>).join('. ')
+          : 'Registration failed'
         : 'Registration failed';
-      setError(msg);
+      setError(message);
     } finally {
       setLoading(false);
     }

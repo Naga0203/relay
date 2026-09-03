@@ -39,7 +39,7 @@ export interface Message {
   senderName: string;
   senderAvatarUrl: string | null;
   content: string | null;
-  messageType: 'TEXT' | 'IMAGE' | 'FILE' | 'SYSTEM';
+  messageType: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE' | 'SYSTEM';
   sequenceNumber: number;
   replyToId: string | null;
   createdAt: string;
@@ -65,8 +65,16 @@ export interface RegisterRequest {
   password: string;
 }
 
+export interface FileUploadResponse {
+  fileName: string;
+  fileUrl: string;
+  contentType: string;
+  size: number;
+}
+
 export interface SendMessageRequest {
-  content: string;
+  content?: string;
+  messageType?: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE';
   replyToId?: string;
   idempotencyKey?: string;
 }

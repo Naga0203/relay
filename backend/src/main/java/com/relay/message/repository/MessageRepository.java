@@ -5,6 +5,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.QueryHints;
+
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,8 +26,10 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
            "ORDER BY m.sequenceNumber DESC")
     List<Message> findByConversationIdBefore(UUID conversationId, Long beforeSequence, Pageable pageable);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT COALESCE(MAX(m.sequenceNumber), 0) FROM Message m WHERE m.conversation.id = :conversationId")
-    Long findMaxSequenceNumber(UUID conversationId);
+    @QueryHints({@QueryHint(name = "jakarta.persistence.lock.timeout", value = "5000")})
+    Long findMaxSequenceNumberForUpdate(UUID conversationId);
 
     Optional<Message> findByIdempotencyKey(String idempotencyKey);
 

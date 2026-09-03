@@ -75,6 +75,9 @@ public class AuthService {
         refreshTokenRepository.save(refreshToken);
 
         User user = refreshToken.getUser();
+        if (userRepository.findById(user.getId()).isEmpty()) {
+            throw ApiException.unauthorized("User account no longer exists");
+        }
         return createAuthResponse(user);
     }
 
@@ -84,6 +87,7 @@ public class AuthService {
         log.info("User logged out: {}", principal.getEmail());
     }
 
+    @Transactional(readOnly = true)
     public UserResponse getCurrentUser(UserPrincipal principal) {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> ApiException.notFound("User", principal.getId()));

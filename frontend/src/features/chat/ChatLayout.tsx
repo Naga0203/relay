@@ -46,6 +46,7 @@ export function ChatLayout() {
           </div>
           <button
             onClick={toggleSidebar}
+            aria-label="Close sidebar"
             className="lg:hidden text-dark-300 hover:text-white transition-colors p-1"
           >
             <X className="w-5 h-5" />
@@ -73,6 +74,7 @@ export function ChatLayout() {
             </div>
             <button
               onClick={handleLogout}
+              aria-label="Logout"
               title="Logout"
               className="text-dark-400 hover:text-danger-500 transition-colors p-1.5 rounded-lg hover:bg-dark-700"
             >
@@ -96,6 +98,7 @@ export function ChatLayout() {
         <div className="lg:hidden flex items-center gap-3 p-3 border-b border-dark-600 bg-dark-800">
           <button
             onClick={toggleSidebar}
+            aria-label="Open sidebar"
             className="text-dark-300 hover:text-white transition-colors p-1"
           >
             <Menu className="w-5 h-5" />

@@ -15,9 +15,8 @@ export const conversationApi = {
     api.post<Conversation>('/conversations', data).then((r) => r.data),
 
   addMember: (conversationId: string, memberId: string) =>
-    api.post<Conversation>(`/conversations/${conversationId}/members`, `"${memberId}"`, {
-      headers: { 'Content-Type': 'application/json' },
-    }).then((r) => r.data),
+    api.post<Conversation>(`/conversations/${conversationId}/members`, { memberId })
+      .then((r) => r.data),
 
   removeMember: (conversationId: string, userId: string) =>
     api.delete(`/conversations/${conversationId}/members/${userId}`),

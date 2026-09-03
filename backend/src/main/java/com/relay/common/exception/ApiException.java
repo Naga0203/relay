@@ -35,4 +35,8 @@ public class ApiException extends RuntimeException {
     public static ApiException unauthorized(String message) {
         return new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", message);
     }
+
+    public static ApiException internalServerError(String message) {
+        return new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", message);
+    }
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { authApi } from './api';
 import { useAuthStore } from '../../stores/authStore';
 import { MessageSquare, Loader2, Eye, EyeOff } from 'lucide-react';
@@ -22,8 +23,11 @@ export function LoginPage() {
       const res = await authApi.login({ email, password });
       login(res.accessToken, res.refreshToken, res.user);
       navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Login failed');
+    } catch (err: unknown) {
+      const message = axios.isAxiosError(err)
+        ? err.response?.data?.message || 'Login failed'
+        : 'Login failed';
+      setError(message);
     } finally {
       setLoading(false);
     }

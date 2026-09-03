@@ -51,13 +51,11 @@ public class Message {
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
-    @Builder.Default
-    private Instant createdAt = Instant.now();
+    private Instant createdAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
-    @Builder.Default
-    private Instant updatedAt = Instant.now();
+    private Instant updatedAt;
 
     @Column(name = "deleted_at")
     private Instant deletedAt;
@@ -67,6 +65,6 @@ public class Message {
     }
 
     public enum MessageType {
-        TEXT, IMAGE, FILE, SYSTEM
+        TEXT, IMAGE, GIF, FILE, SYSTEM
     }
 }

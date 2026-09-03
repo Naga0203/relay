@@ -1,6 +1,7 @@
 package com.relay.conversation.controller;
 
 import com.relay.auth.security.UserPrincipal;
+import com.relay.conversation.dto.AddMemberRequest;
 import com.relay.conversation.dto.ConversationResponse;
 import com.relay.conversation.dto.CreateConversationRequest;
 import com.relay.conversation.service.ConversationService;
@@ -45,8 +46,8 @@ public class ConversationController {
     public ResponseEntity<ConversationResponse> addMember(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID id,
-            @RequestBody UUID memberId) {
-        return ResponseEntity.ok(conversationService.addMember(principal, id, memberId));
+            @Valid @RequestBody AddMemberRequest request) {
+        return ResponseEntity.ok(conversationService.addMember(principal, id, request.memberId()));
     }
 
     @DeleteMapping("/{id}/members/{userId}")

@@ -4,6 +4,7 @@ import com.relay.auth.security.UserPrincipal;
 import com.relay.common.exception.ApiException;
 import com.relay.user.dto.UpdateProfileRequest;
 import com.relay.user.dto.UserResponse;
+import com.relay.user.dto.UserSearchResponse;
 import com.relay.user.entity.User;
 import com.relay.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -46,9 +47,9 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public List<UserResponse> searchUsers(String query) {
+    public List<UserSearchResponse> searchUsers(String query) {
         return userRepository.searchByNameOrEmail(query).stream()
-                .map(UserResponse::from)
+                .map(UserSearchResponse::from)
                 .toList();
     }
 }

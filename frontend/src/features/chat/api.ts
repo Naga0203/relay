@@ -20,8 +20,20 @@ export const messageApi = {
 
   delete: (messageId: string) => api.delete(`/messages/${messageId}`),
 
-  search: (conversationId: string, query: string) =>
-    api
-      .get<Message[]>(`/conversations/${conversationId}/messages/search?q=${encodeURIComponent(query)}`)
-      .then((r) => r.data),
+  search: (conversationId: string, query: string) => {
+    const params = new URLSearchParams({ q: query });
+    return api
+      .get<Message[]>(`/conversations/${conversationId}/messages/search?${params}`)
+      .then((r) => r.data);
+  },
+
+  uploadFile: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api
+      .post<{ fileName: string; fileUrl: string; contentType: string; size: number }>('/files/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
 };

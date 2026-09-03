@@ -93,7 +93,7 @@ public class ConversationService {
         // Verify the requester is an admin
         ConversationMember requester = memberRepository
                 .findByConversationIdAndUserId(conversationId, principal.getId())
-                .orElseThrow();
+                .orElseThrow(() -> ApiException.notFound("ConversationMember", conversationId + "/" + principal.getId()));
         if (requester.getRole() != ConversationMember.MemberRole.ADMIN) {
             throw ApiException.forbidden("Only admins can add members");
         }
@@ -118,7 +118,7 @@ public class ConversationService {
         if (!principal.getId().equals(memberId)) {
             ConversationMember requester = memberRepository
                     .findByConversationIdAndUserId(conversationId, principal.getId())
-                    .orElseThrow();
+                    .orElseThrow(() -> ApiException.notFound("ConversationMember", conversationId + "/" + principal.getId()));
             if (requester.getRole() != ConversationMember.MemberRole.ADMIN) {
                 throw ApiException.forbidden("Only admins can remove other members");
             }

@@ -7,6 +7,6 @@ export const userApi = {
   updateProfile: (data: { name?: string; avatarUrl?: string; status?: string }) =>
     api.patch<User>('/users/me', data).then((r) => r.data),
 
-  search: (q: string) =>
-    api.get<User[]>(`/users/search?q=${encodeURIComponent(q)}`).then((r) => r.data),
+  search: (q: string, signal?: AbortSignal) =>
+    api.get<User[]>(`/users/search?q=${encodeURIComponent(q)}`, { signal }).then((r) => r.data),
 };
