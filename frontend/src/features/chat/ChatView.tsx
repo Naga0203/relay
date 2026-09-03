@@ -3,15 +3,209 @@ import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-q
 import { messageApi } from './api';
 import { useAuthStore } from '../../stores/authStore';
 import type { Conversation, Message, SendMessageRequest } from '../../types';
-import { Send, Loader2, ArrowDown, Smile, Image as ImageIcon, Film } from 'lucide-react';
+import { Send, Loader2, ArrowDown, Smile, Image as ImageIcon, Film, ShieldCheck, Lock } from 'lucide-react';
 import { EmojiPicker } from '../../components/EmojiPicker';
 import { GifPicker } from '../../components/GifPicker';
 import { ImageUploadModal } from '../../components/ImageUploadModal';
 import { ImageLightbox } from '../../components/ImageLightbox';
+import { encryptText, decryptText, decryptFileToUrl, isEncrypted } from '../../lib/e2eCrypto';
 
 interface Props {
   conversationId: string;
   conversations: Conversation[];
+}
+
+interface DecryptedItemProps {
+  msg: Message;
+  conversationId: string;
+  isOwn: boolean;
+  formatTime: (iso: string) => string;
+  setLightboxSrc: (src: string) => void;
+}
+
+/**
+ * Sub-component for rendering single decrypted E2EE messages and attachments.
+ */
+function DecryptedMessageItem({ msg, conversationId, isOwn, formatTime, setLightboxSrc }: DecryptedItemProps) {
+  const [decryptedText, setDecryptedText] = useState<string>('');
+  const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+  const [loadingMedia, setLoadingMedia] = useState<boolean>(false);
+
+  const encrypted = isEncrypted(msg.content);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function performDecrypt() {
+      if (!msg.content) {
+        setDecryptedText('');
+        return;
+      }
+      const plain = await decryptText(msg.content, conversationId);
+      if (isMounted) {
+        setDecryptedText(plain);
+      }
+    }
+    performDecrypt();
+    return () => {
+      isMounted = false;
+    };
+  }, [msg.content, conversationId]);
+
+  const lines = decryptedText.split('\n');
+  const firstLine = lines[0] || '';
+  const restLines = lines.slice(1).join('\n');
+
+  const isImgUrl = (url: string) => {
+    return (
+      url.match(/\.(jpeg|jpg|gif|png|webp|enc)($|\?)/i) != null ||
+      url.includes('/api/v1/files/') ||
+      url.includes('giphy.com/media')
+    );
+  };
+
+  // Handle encrypted file payload fetch & local decryption
+  useEffect(() => {
+    let isMounted = true;
+    if (!firstLine || !firstLine.includes('/api/v1/files/')) return;
+
+    if (firstLine.endsWith('.enc') || firstLine.includes('/api/v1/files/')) {
+      setLoadingMedia(true);
+      fetch(firstLine)
+        .then((res) => res.arrayBuffer())
+        .then(async (buffer) => {
+          if (!isMounted) return;
+          // Decrypt encrypted binary array buffer with conversation key
+          const url = await decryptFileToUrl(buffer, conversationId, 'image/png');
+          if (isMounted) {
+            setMediaBlobUrl(url || firstLine);
+          }
+        })
+        .catch(() => {
+          if (isMounted) setMediaBlobUrl(firstLine);
+        })
+        .finally(() => {
+          if (isMounted) setLoadingMedia(false);
+        });
+    } else {
+      setMediaBlobUrl(firstLine);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [firstLine, conversationId]);
+
+  const renderBody = () => {
+    if (msg.deleted) {
+      return <span className="italic text-dark-400">Message deleted</span>;
+    }
+
+    if (!decryptedText && msg.content) {
+      return <Loader2 className="w-4 h-4 animate-spin text-dark-400" />;
+    }
+
+    // IMAGE message type or direct image link
+    if (
+      msg.messageType === 'IMAGE' ||
+      (msg.messageType === 'TEXT' && isImgUrl(firstLine) && !firstLine.includes('giphy.com'))
+    ) {
+      const displaySrc = mediaBlobUrl || firstLine;
+      return (
+        <div className="space-y-1.5 my-0.5">
+          <div
+            onClick={() => displaySrc && setLightboxSrc(displaySrc)}
+            className="group relative max-w-sm rounded-xl overflow-hidden cursor-pointer bg-dark-800 border border-dark-600/50 hover:border-primary-500/50 transition-all shadow-md"
+          >
+            {loadingMedia ? (
+              <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                <span>Decrypting E2EE Media...</span>
+              </div>
+            ) : (
+              <img
+                src={displaySrc}
+                alt="E2EE Attachment"
+                className="w-full max-h-72 object-cover rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
+                loading="lazy"
+              />
+            )}
+            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
+              Click to enlarge 🔍
+            </div>
+          </div>
+          {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
+        </div>
+      );
+    }
+
+    // GIF message type
+    if (
+      msg.messageType === 'GIF' ||
+      (msg.messageType === 'TEXT' && (firstLine.includes('giphy.com') || firstLine.endsWith('.gif')))
+    ) {
+      const gifSrc = mediaBlobUrl || firstLine;
+      return (
+        <div className="space-y-1.5 my-0.5">
+          <div
+            onClick={() => gifSrc && setLightboxSrc(gifSrc)}
+            className="group relative max-w-sm rounded-xl overflow-hidden cursor-pointer bg-dark-800 border border-dark-600/50 hover:border-accent-500/50 transition-all shadow-md"
+          >
+            <img
+              src={gifSrc}
+              alt="GIF"
+              className="w-full max-h-72 object-contain rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
+              loading="lazy"
+            />
+            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] text-white font-bold tracking-wider">
+              GIF
+            </div>
+            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
+              Click to enlarge 🔍
+            </div>
+          </div>
+          {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
+        </div>
+      );
+    }
+
+    // Standard decrypted text
+    return <span className="whitespace-pre-wrap">{decryptedText}</span>;
+  };
+
+  return (
+    <div
+      className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+        msg.deleted
+          ? 'bg-dark-700 text-dark-400 italic'
+          : isOwn
+          ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white rounded-br-md'
+          : 'bg-dark-700 text-dark-100 rounded-bl-md'
+      }`}
+    >
+      {renderBody()}
+
+      <div className={`flex items-center gap-1.5 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+        {encrypted && (
+          <span
+            title="End-to-End Encrypted (AES-GCM 256)"
+            className={`inline-flex items-center text-[10px] ${
+              isOwn ? 'text-white/60' : 'text-emerald-400'
+            }`}
+          >
+            <Lock className="w-2.5 h-2.5 mr-0.5 inline" />
+          </span>
+        )}
+        <span className={`text-[10px] ${isOwn ? 'text-white/50' : 'text-dark-400'}`}>
+          {formatTime(msg.createdAt)}
+        </span>
+        {msg.edited && (
+          <span className={`text-[10px] ${isOwn ? 'text-white/40' : 'text-dark-500'}`}>
+            edited
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function ChatView({ conversationId, conversations }: Props) {
@@ -30,21 +224,14 @@ export function ChatView({ conversationId, conversations }: Props) {
 
   const conversation = conversations.find((c) => c.id === conversationId);
 
-  // Determine display name for conversation
-  const conversationName = conversation?.type === 'DIRECT'
-    ? conversation.members.find((m) => m.userId !== user?.id)?.name || 'Chat'
-    : conversation?.name || 'Group';
+  const conversationName =
+    conversation?.type === 'DIRECT'
+      ? conversation.members.find((m) => m.userId !== user?.id)?.name || 'Chat'
+      : conversation?.name || 'Group';
 
-  const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isLoading,
-  } = useInfiniteQuery({
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
     queryKey: ['messages', conversationId],
-    queryFn: ({ pageParam }) =>
-      messageApi.list(conversationId, pageParam as number | undefined),
+    queryFn: ({ pageParam }) => messageApi.list(conversationId, pageParam as number | undefined),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     initialPageParam: undefined as number | undefined,
     refetchInterval: 4000,
@@ -89,14 +276,22 @@ export function ChatView({ conversationId, conversations }: Props) {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || sendMutation.isPending) return;
+
     setInput('');
     setShowEmojiPicker(false);
     setShowGifPicker(false);
-    sendMutation.mutate({ content: trimmed, messageType: 'TEXT' });
+
+    // E2EE encrypt message text before sending to server
+    const encryptedContent = await encryptText(trimmed, conversationId);
+
+    sendMutation.mutate({
+      content: encryptedContent,
+      messageType: 'TEXT',
+    });
   };
 
   const handleSelectEmoji = (emoji: string) => {
@@ -104,10 +299,12 @@ export function ChatView({ conversationId, conversations }: Props) {
     inputRef.current?.focus();
   };
 
-  const handleSelectGif = (gifUrl: string) => {
+  const handleSelectGif = async (gifUrl: string) => {
     setShowGifPicker(false);
+    // E2EE encrypt GIF URL payload
+    const encryptedGif = await encryptText(gifUrl, conversationId);
     sendMutation.mutate({
-      content: gifUrl,
+      content: encryptedGif,
       messageType: 'GIF',
     });
   };
@@ -127,7 +324,6 @@ export function ChatView({ conversationId, conversations }: Props) {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  // Group messages by date
   const messagesByDate = useMemo(() => {
     const groups: { date: string; messages: Message[] }[] = [];
     let lastDate = '';
@@ -143,97 +339,37 @@ export function ChatView({ conversationId, conversations }: Props) {
     return groups;
   }, [allMessages]);
 
-  const isImageUrl = (url: string) => {
-    return (
-      url.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i) != null ||
-      url.includes('/api/v1/files/') ||
-      url.includes('giphy.com/media')
-    );
-  };
-
-  const renderMessageContent = (msg: Message) => {
-    if (msg.deleted) {
-      return <span className="italic text-dark-400">Message deleted</span>;
-    }
-
-    const content = msg.content || '';
-    const lines = content.split('\n');
-    const firstLine = lines[0] || '';
-    const restLines = lines.slice(1).join('\n');
-
-    // Handle IMAGE message or direct image URL
-    if (msg.messageType === 'IMAGE' || (msg.messageType === 'TEXT' && isImageUrl(firstLine) && !firstLine.includes('giphy.com'))) {
-      const imageUrl = firstLine.trim();
-      return (
-        <div className="space-y-1.5 my-0.5">
-          <div
-            onClick={() => setLightboxSrc(imageUrl)}
-            className="group relative max-w-sm rounded-xl overflow-hidden cursor-pointer bg-dark-800 border border-dark-600/50 hover:border-primary-500/50 transition-all shadow-md"
-          >
-            <img
-              src={imageUrl}
-              alt="Attachment"
-              className="w-full max-h-72 object-cover rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
-              loading="lazy"
-            />
-            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
-              Click to enlarge 🔍
-            </div>
-          </div>
-          {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
-        </div>
-      );
-    }
-
-    // Handle GIF message
-    if (msg.messageType === 'GIF' || (msg.messageType === 'TEXT' && (firstLine.includes('giphy.com') || firstLine.endsWith('.gif')))) {
-      const gifUrl = firstLine.trim();
-      return (
-        <div className="space-y-1.5 my-0.5">
-          <div
-            onClick={() => setLightboxSrc(gifUrl)}
-            className="group relative max-w-sm rounded-xl overflow-hidden cursor-pointer bg-dark-800 border border-dark-600/50 hover:border-accent-500/50 transition-all shadow-md"
-          >
-            <img
-              src={gifUrl}
-              alt="GIF"
-              className="w-full max-h-72 object-contain rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
-              loading="lazy"
-            />
-            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] text-white font-bold tracking-wider">
-              GIF
-            </div>
-            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
-              Click to enlarge 🔍
-            </div>
-          </div>
-          {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
-        </div>
-      );
-    }
-
-    // Standard Text
-    return <span className="whitespace-pre-wrap">{content}</span>;
-  };
-
   return (
     <div className="flex-1 flex flex-col min-h-0 relative">
-      {/* Chat Header */}
-      <div className="px-5 py-3 border-b border-dark-600 bg-dark-800/80 backdrop-blur-sm flex items-center gap-3 z-10">
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white font-semibold text-sm shrink-0">
-          {conversationName.charAt(0).toUpperCase()}
+      {/* Chat Header with E2EE Badge */}
+      <div className="px-5 py-3 border-b border-dark-600 bg-dark-800/80 backdrop-blur-sm flex items-center justify-between z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white font-semibold text-sm shrink-0">
+            {conversationName.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-white flex items-center gap-1.5">
+              <span>{conversationName}</span>
+            </h2>
+            <p className="text-xs text-dark-300">
+              {conversation?.type === 'GROUP'
+                ? `${conversation.members.length} members`
+                : 'Direct message'}
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-sm font-semibold text-white">{conversationName}</h2>
-          <p className="text-xs text-dark-300">
-            {conversation?.type === 'GROUP'
-              ? `${conversation.members.length} members`
-              : 'Direct message'}
-          </p>
+
+        {/* E2EE Security Shield Badge */}
+        <div
+          title="End-to-End Encrypted (AES-GCM 256-bit). Server stores zero plaintext data."
+          className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-[11px] font-medium"
+        >
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span>End-to-End Encrypted</span>
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Messages Stream */}
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
@@ -250,8 +386,9 @@ export function ChatView({ conversationId, conversations }: Props) {
             <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
           </div>
         ) : allMessages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-dark-400 text-sm">
-            No messages yet. Say hello! 👋
+          <div className="flex items-center justify-center h-full text-dark-400 text-sm flex-col gap-2">
+            <ShieldCheck className="w-8 h-8 text-emerald-500/60" />
+            <span>Messages in this chat are end-to-end encrypted.</span>
           </div>
         ) : (
           messagesByDate.map((group) => (
@@ -290,40 +427,14 @@ export function ChatView({ conversationId, conversations }: Props) {
                       {showAvatar && !isOwn && (
                         <p className="text-xs text-dark-300 mb-1 ml-1 font-medium">{msg.senderName}</p>
                       )}
-                      <div
-                        className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                          msg.deleted
-                            ? 'bg-dark-700 text-dark-400 italic'
-                            : isOwn
-                            ? 'bg-gradient-to-br from-primary-500 to-primary-600 text-white rounded-br-md'
-                            : 'bg-dark-700 text-dark-100 rounded-bl-md'
-                        }`}
-                      >
-                        {renderMessageContent(msg)}
-
-                        <div
-                          className={`flex items-center gap-1.5 mt-1 ${
-                            isOwn ? 'justify-end' : 'justify-start'
-                          }`}
-                        >
-                          <span
-                            className={`text-[10px] ${
-                              isOwn ? 'text-white/50' : 'text-dark-400'
-                            }`}
-                          >
-                            {formatTime(msg.createdAt)}
-                          </span>
-                          {msg.edited && (
-                            <span
-                              className={`text-[10px] ${
-                                isOwn ? 'text-white/40' : 'text-dark-500'
-                              }`}
-                            >
-                              edited
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                      
+                      <DecryptedMessageItem
+                        msg={msg}
+                        conversationId={conversationId}
+                        isOwn={isOwn}
+                        formatTime={formatTime}
+                        setLightboxSrc={setLightboxSrc}
+                      />
                     </div>
                   </div>
                 );
@@ -392,7 +503,7 @@ export function ChatView({ conversationId, conversations }: Props) {
           <button
             type="button"
             onClick={() => setShowImageModal(true)}
-            title="Attach Image"
+            title="Attach Encrypted Image"
             className="p-2 rounded-xl text-dark-300 hover:text-primary-400 hover:bg-dark-700 transition-all shrink-0"
           >
             <ImageIcon className="w-5 h-5" />
@@ -404,7 +515,7 @@ export function ChatView({ conversationId, conversations }: Props) {
               setShowGifPicker((prev) => !prev);
               setShowEmojiPicker(false);
             }}
-            title="Choose GIF"
+            title="Choose Encrypted GIF"
             className={`p-2 rounded-xl transition-all shrink-0 ${
               showGifPicker
                 ? 'text-accent-400 bg-dark-700'
@@ -434,7 +545,7 @@ export function ChatView({ conversationId, conversations }: Props) {
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message..."
+            placeholder="Send an encrypted message..."
             className="flex-1 px-4 py-2.5 bg-dark-700 border border-dark-500 rounded-xl text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all text-sm"
           />
 

@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { X, Upload, Link as LinkIcon, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { messageApi } from '../features/chat/api';
+import { encryptFile, encryptText } from '../lib/e2eCrypto';
 
 interface Props {
   conversationId: string;
@@ -56,7 +57,9 @@ export function ImageUploadModal({ conversationId, onSuccess, onClose }: Props) 
           setLoading(false);
           return;
         }
-        const uploadRes = await messageApi.uploadFile(selectedFile);
+        // Client-side E2EE file payload encryption
+        const encryptedFile = await encryptFile(selectedFile, conversationId);
+        const uploadRes = await messageApi.uploadFile(encryptedFile);
         finalImageUrl = uploadRes.fileUrl;
       } else {
         if (!imageUrlInput.trim()) {
@@ -72,8 +75,11 @@ export function ImageUploadModal({ conversationId, onSuccess, onClose }: Props) 
         ? `${finalImageUrl}\n${caption.trim()}`
         : finalImageUrl;
 
+      // Encrypt final message payload with AES-GCM 256-bit
+      const encryptedContent = await encryptText(content, conversationId);
+
       await messageApi.send(conversationId, {
-        content,
+        content: encryptedContent,
         messageType: 'IMAGE',
         idempotencyKey: crypto.randomUUID(),
       });
