@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- ARCH FIX (§12a): connect-src includes https://api.giphy.com so the GifPicker
+         live-search fetch() is not silently blocked. Keep in sync with
+         SecurityHeadersFilter.java — the HTTP header wins in most browsers when both
+         a meta tag and a response header are present, but we keep them aligned for
+         environments where the SPA is served statically without the Spring backend. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.giphy.com; connect-src 'self' https://api.giphy.com; frame-ancestors 'none'" />
     <meta name="description" content="Relay — Real-time chat platform built with Spring Boot and React" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

@@ -21,6 +21,7 @@ public record ConversationResponse(
             UUID userId,
             String name,
             String avatarUrl,
+            String publicKey,
             ConversationMember.MemberRole role,
             Instant joinedAt
     ) {}
@@ -31,6 +32,7 @@ public record ConversationResponse(
                         m.getUserId(),
                         m.getUser() != null ? m.getUser().getName() : null,
                         m.getUser() != null ? m.getUser().getAvatarUrl() : null,
+                        m.getUser() != null ? m.getUser().getPublicKey() : null,
                         m.getRole(),
                         m.getJoinedAt()
                 ))

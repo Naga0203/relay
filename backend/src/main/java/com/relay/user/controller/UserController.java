@@ -1,6 +1,7 @@
 package com.relay.user.controller;
 
 import com.relay.auth.security.UserPrincipal;
+import com.relay.user.dto.PublicKeyRequest;
 import com.relay.user.dto.UpdateProfileRequest;
 import com.relay.user.dto.UserResponse;
 import com.relay.user.dto.UserSearchResponse;
@@ -38,5 +39,19 @@ public class UserController {
     public ResponseEntity<List<UserSearchResponse>> searchUsers(
             @RequestParam @Size(min = 1, max = 200, message = "Search query must be 1-200 characters") String q) {
         return ResponseEntity.ok(userService.searchUsers(q));
+    }
+
+    @PutMapping("/me/public-key")
+    public ResponseEntity<Void> uploadPublicKey(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody PublicKeyRequest request) {
+        userService.updatePublicKey(principal, request.publicKey());
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{id}/public-key")
+    public ResponseEntity<java.util.Map<String, String>> getPublicKey(@PathVariable UUID id) {
+        String publicKey = userService.getPublicKey(id);
+        return ResponseEntity.ok(java.util.Map.of("publicKey", publicKey != null ? publicKey : ""));
     }
 }

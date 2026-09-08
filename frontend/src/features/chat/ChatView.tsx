@@ -8,7 +8,17 @@ import { EmojiPicker } from '../../components/EmojiPicker';
 import { GifPicker } from '../../components/GifPicker';
 import { ImageUploadModal } from '../../components/ImageUploadModal';
 import { ImageLightbox } from '../../components/ImageLightbox';
-import { encryptText, decryptText, decryptFileToUrl, isEncrypted } from '../../lib/e2eCrypto';
+import { SecurityCodeModal } from '../../components/SecurityCodeModal';
+import { KeyChangeWarningBanner } from '../../components/KeyChangeWarningBanner';
+import {
+  decryptText,
+  decryptFileToUrl,
+  isEncrypted,
+  checkAndPinPeerKey,
+  encryptMessageForGroup,
+  decryptGroupMessage,
+} from '../../lib/e2eCrypto';
+import { useKeyVerificationStore } from '../../stores/keyVerificationStore';
 
 interface Props {
   conversationId: string;
@@ -18,6 +28,7 @@ interface Props {
 interface DecryptedItemProps {
   msg: Message;
   conversationId: string;
+  peerPublicKey: string;
   isOwn: boolean;
   formatTime: (iso: string) => string;
   setLightboxSrc: (src: string) => void;
@@ -26,13 +37,15 @@ interface DecryptedItemProps {
 /**
  * Sub-component for rendering single decrypted E2EE messages and attachments.
  */
-function DecryptedMessageItem({ msg, conversationId, isOwn, formatTime, setLightboxSrc }: DecryptedItemProps) {
+function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, formatTime, setLightboxSrc }: DecryptedItemProps) {
   const [decryptedText, setDecryptedText] = useState<string>('');
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
   const [loadingMedia, setLoadingMedia] = useState<boolean>(false);
 
   const encrypted = isEncrypted(msg.content);
 
+  // ARCH FIX (§9): Use group decryption when recipientKeys are present on the message.
+  // Falls back to legacy pairwise decryptText for older messages without wrapped keys.
   useEffect(() => {
     let isMounted = true;
     async function performDecrypt() {
@@ -40,7 +53,16 @@ function DecryptedMessageItem({ msg, conversationId, isOwn, formatTime, setLight
         setDecryptedText('');
         return;
       }
-      const plain = await decryptText(msg.content, conversationId);
+      // Determine the current user's wrapped key (if available).
+      const myWrappedKey = msg.recipientKeys?.[useAuthStore.getState().user?.id ?? ''] ?? null;
+      let plain: string;
+      if (myWrappedKey) {
+        // §9 fan-out decryption path
+        plain = await decryptGroupMessage(msg.content, conversationId, peerPublicKey, myWrappedKey);
+      } else {
+        // Legacy pairwise decryption path
+        plain = await decryptText(msg.content, conversationId, peerPublicKey);
+      }
       if (isMounted) {
         setDecryptedText(plain);
       }
@@ -49,7 +71,7 @@ function DecryptedMessageItem({ msg, conversationId, isOwn, formatTime, setLight
     return () => {
       isMounted = false;
     };
-  }, [msg.content, conversationId]);
+  }, [msg.content, conversationId, peerPublicKey, msg.recipientKeys]);
 
   const lines = decryptedText.split('\n');
   const firstLine = lines[0] || '';
@@ -74,8 +96,18 @@ function DecryptedMessageItem({ msg, conversationId, isOwn, formatTime, setLight
         .then((res) => res.arrayBuffer())
         .then(async (buffer) => {
           if (!isMounted) return;
-          // Decrypt encrypted binary array buffer with conversation key
-          const url = await decryptFileToUrl(buffer, conversationId, 'image/png');
+          // ARCH FIX (§12b): Derive the real MIME type from the URL before it gained
+          // the .enc suffix, rather than hardcoding 'image/png'.  For example
+          // "photo.jpg.enc" → "image/jpeg".  Falls back to 'image/jpeg' for unknown
+          // extensions since the vast majority of encrypted uploads are photos.
+          const baseName = firstLine.replace(/\.enc$/i, '');
+          const ext = baseName.split('.').pop()?.toLowerCase() ?? '';
+          const mimeFromExt: Record<string, string> = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+          };
+          const detectedMime = mimeFromExt[ext] ?? 'image/jpeg';
+          const url = await decryptFileToUrl(buffer, conversationId, peerPublicKey, detectedMime);
           if (isMounted) {
             setMediaBlobUrl(url || firstLine);
           }
@@ -93,7 +125,7 @@ function DecryptedMessageItem({ msg, conversationId, isOwn, formatTime, setLight
     return () => {
       isMounted = false;
     };
-  }, [firstLine, conversationId]);
+  }, [firstLine, conversationId, peerPublicKey]);
 
   const renderBody = () => {
     if (msg.deleted) {
@@ -215,6 +247,8 @@ export function ChatView({ conversationId, conversations }: Props) {
   const [showGifPicker, setShowGifPicker] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  // SECURITY FIX (§8): state for the Security Code modal (fingerprint display).
+  const [showSecurityCode, setShowSecurityCode] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -222,12 +256,41 @@ export function ChatView({ conversationId, conversations }: Props) {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
 
+  // SECURITY FIX (§8): key-change warning state from the global store.
+  const hasKeyWarning    = useKeyVerificationStore((s) => s.hasWarning);
+  const addKeyWarning    = useKeyVerificationStore((s) => s.addWarning);
+
   const conversation = conversations.find((c) => c.id === conversationId);
 
   const conversationName =
     conversation?.type === 'DIRECT'
       ? conversation.members.find((m) => m.userId !== user?.id)?.name || 'Chat'
       : conversation?.name || 'Group';
+
+  const peerMember = conversation?.members.find((m) => m.userId !== user?.id);
+  const peerPublicKey = peerMember?.publicKey || '';
+
+  // SECURITY FIX (§8): TOFU key pinning check.
+  // Whenever the peer's public key changes (or we see it for the first time),
+  // compare it against our IndexedDB pin.  On 'changed', push a warning into the
+  // keyVerificationStore so the UI blocks further sends until the user acknowledges.
+  useEffect(() => {
+    if (!peerMember || !peerPublicKey) return;
+    let cancelled = false;
+    checkAndPinPeerKey(peerMember.userId, peerPublicKey).then((result) => {
+      if (cancelled) return;
+      if (result.status === 'changed') {
+        addKeyWarning({
+          userId: peerMember.userId,
+          userName: peerMember.name ?? conversationName,
+          oldKeyBase64: result.pinned.publicKeyBase64,
+          newKeyBase64: result.newKey,
+          detectedAt: Date.now(),
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [peerMember?.userId, peerPublicKey, conversationName, addKeyWarning]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
     queryKey: ['messages', conversationId],
@@ -276,21 +339,42 @@ export function ChatView({ conversationId, conversations }: Props) {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  // ARCH FIX (§9): Build a recipients array from all conversation members except self.
+  // Used for both text and GIF sends via encryptMessageForGroup.
+  const encryptionRecipients = useMemo(() => {
+    if (!conversation || !user) return [];
+    return conversation.members
+      .filter((m) => m.userId !== user.id && m.publicKey)
+      .map((m) => ({ userId: m.userId, publicKeyBase64: m.publicKey! }));
+  }, [conversation, user]);
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = input.trim();
     if (!trimmed || sendMutation.isPending) return;
 
+    // SECURITY FIX (§8): Block sending if there is an unacknowledged key-change warning
+    // for the peer.  This prevents silently encrypting to an unverified new key.
+    if (peerMember && hasKeyWarning(peerMember.userId)) {
+      return;
+    }
+
     setInput('');
     setShowEmojiPicker(false);
     setShowGifPicker(false);
 
-    // E2EE encrypt message text before sending to server
-    const encryptedContent = await encryptText(trimmed, conversationId);
+    // ARCH FIX (§9): Use fan-out group encryption for all conversations.
+    // For DIRECT chats this collapses to a single recipient — no special-casing.
+    const { encryptedContent, recipientKeys } = await encryptMessageForGroup(
+      trimmed,
+      conversationId,
+      encryptionRecipients
+    );
 
     sendMutation.mutate({
       content: encryptedContent,
       messageType: 'TEXT',
+      recipientKeys,
     });
   };
 
@@ -301,11 +385,16 @@ export function ChatView({ conversationId, conversations }: Props) {
 
   const handleSelectGif = async (gifUrl: string) => {
     setShowGifPicker(false);
-    // E2EE encrypt GIF URL payload
-    const encryptedGif = await encryptText(gifUrl, conversationId);
+    // ARCH FIX (§9): Use fan-out group encryption for GIFs too.
+    const { encryptedContent, recipientKeys } = await encryptMessageForGroup(
+      gifUrl,
+      conversationId,
+      encryptionRecipients
+    );
     sendMutation.mutate({
-      content: encryptedGif,
+      content: encryptedContent,
       messageType: 'GIF',
+      recipientKeys,
     });
   };
 
@@ -359,15 +448,26 @@ export function ChatView({ conversationId, conversations }: Props) {
           </div>
         </div>
 
-        {/* E2EE Security Shield Badge */}
-        <div
-          title="End-to-End Encrypted (AES-GCM 256-bit). Server stores zero plaintext data."
-          className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-[11px] font-medium"
+        {/* SECURITY FIX (§8): E2EE badge is now a button that opens the Security Code modal.
+            Users can compare fingerprints out-of-band to verify no key substitution occurred. */}
+        <button
+          onClick={() => setShowSecurityCode(true)}
+          title="View Security Code — compare fingerprints to verify your conversation"
+          className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-[11px] font-medium hover:bg-emerald-500/20 transition-colors"
         >
           <ShieldCheck className="w-3.5 h-3.5" />
           <span>End-to-End Encrypted</span>
-        </div>
+        </button>
       </div>
+
+      {/* SECURITY FIX (§8): Key-change warning banner — blocks chat interaction until
+          the user explicitly acknowledges the new key.  Non-dismissible by design. */}
+      {peerMember && (
+        <KeyChangeWarningBanner
+          userId={peerMember.userId}
+          userName={peerMember.name ?? conversationName}
+        />
+      )}
 
       {/* Messages Stream */}
       <div
@@ -407,6 +507,11 @@ export function ChatView({ conversationId, conversations }: Props) {
                 const prevMsg = idx > 0 ? group.messages[idx - 1] : null;
                 const showAvatar = !prevMsg || prevMsg.senderId !== msg.senderId;
 
+                // For incoming messages in direct chat, sender is peer; for own messages, recipient is peer
+                const itemPeerKey = isOwn
+                  ? peerPublicKey
+                  : conversation?.members.find((m) => m.userId === msg.senderId)?.publicKey || peerPublicKey;
+
                 return (
                   <div
                     key={msg.id}
@@ -431,6 +536,7 @@ export function ChatView({ conversationId, conversations }: Props) {
                       <DecryptedMessageItem
                         msg={msg}
                         conversationId={conversationId}
+                        peerPublicKey={itemPeerKey}
                         isOwn={isOwn}
                         formatTime={formatTime}
                         setLightboxSrc={setLightboxSrc}
@@ -476,6 +582,7 @@ export function ChatView({ conversationId, conversations }: Props) {
       {showImageModal && (
         <ImageUploadModal
           conversationId={conversationId}
+          peerPublicKey={peerPublicKey}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
             queryClient.invalidateQueries({ queryKey: ['conversations'] });
@@ -490,6 +597,15 @@ export function ChatView({ conversationId, conversations }: Props) {
         <ImageLightbox
           src={lightboxSrc}
           onClose={() => setLightboxSrc(null)}
+        />
+      )}
+
+      {/* SECURITY FIX (§8): Security Code modal — fingerprint comparison. */}
+      {showSecurityCode && peerPublicKey && (
+        <SecurityCodeModal
+          peerName={conversationName}
+          peerPublicKeyBase64={peerPublicKey}
+          onClose={() => setShowSecurityCode(false)}
         />
       )}
 
@@ -545,8 +661,14 @@ export function ChatView({ conversationId, conversations }: Props) {
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Send an encrypted message..."
-            className="flex-1 px-4 py-2.5 bg-dark-700 border border-dark-500 rounded-xl text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all text-sm"
+            // SECURITY FIX (§8): disabled when a key-change warning requires acknowledgement.
+            disabled={!!(peerMember && hasKeyWarning(peerMember.userId))}
+            placeholder={
+              peerMember && hasKeyWarning(peerMember.userId)
+                ? 'Verify the security key change above before sending…'
+                : 'Send an encrypted message...'
+            }
+            className="flex-1 px-4 py-2.5 bg-dark-700 border border-dark-500 rounded-xl text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           />
 
           <button

@@ -28,6 +28,7 @@ export interface ConversationMember {
   userId: string;
   name: string;
   avatarUrl: string | null;
+  publicKey: string | null;
   role: 'ADMIN' | 'MEMBER';
   joinedAt: string;
 }
@@ -46,6 +47,9 @@ export interface Message {
   updatedAt: string;
   edited: boolean;
   deleted: boolean;
+  // ARCH FIX (§9): Per-recipient wrapped message keys for group E2EE.
+  // Map of userId → base64 wrapped per-message AES key. Null for legacy messages.
+  recipientKeys: Record<string, string> | null;
 }
 
 export interface MessagePage {
@@ -77,6 +81,8 @@ export interface SendMessageRequest {
   messageType?: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE';
   replyToId?: string;
   idempotencyKey?: string;
+  // ARCH FIX (§9): Per-recipient wrapped message keys for group E2EE.
+  recipientKeys?: Record<string, string>;
 }
 
 export interface CreateConversationRequest {
@@ -90,4 +96,8 @@ export interface ApiError {
   message: string;
   timestamp: string;
   errors?: Record<string, string>;
+}
+
+export interface PublicKeyResponse {
+  publicKey: string;
 }

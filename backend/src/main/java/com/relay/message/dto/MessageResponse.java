@@ -3,6 +3,7 @@ package com.relay.message.dto;
 import com.relay.message.entity.Message;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 public record MessageResponse(
@@ -18,9 +19,19 @@ public record MessageResponse(
         Instant createdAt,
         Instant updatedAt,
         boolean edited,
-        boolean deleted
+        boolean deleted,
+        // ARCH FIX (§9): Per-recipient wrapped message keys for group E2EE.
+        // Map of userId → base64-encoded wrapped per-message AES key.
+        // Null when no wrapped keys are stored (legacy messages / backward compat).
+        Map<String, String> recipientKeys
 ) {
+    /** Backward-compatible factory — no recipient keys. */
     public static MessageResponse from(Message msg) {
+        return from(msg, null);
+    }
+
+    /** ARCH FIX (§9): Factory that includes per-recipient wrapped keys. */
+    public static MessageResponse from(Message msg, Map<String, String> recipientKeys) {
         Instant createdAt = msg.getCreatedAt() != null ? msg.getCreatedAt() : Instant.now();
         Instant updatedAt = msg.getUpdatedAt() != null ? msg.getUpdatedAt() : Instant.now();
         boolean edited = msg.getCreatedAt() != null && msg.getUpdatedAt() != null
@@ -39,7 +50,9 @@ public record MessageResponse(
                 createdAt,
                 updatedAt,
                 edited,
-                msg.isDeleted()
+                msg.isDeleted(),
+                recipientKeys
         );
     }
 }
+

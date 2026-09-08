@@ -20,20 +20,21 @@ export const messageApi = {
 
   delete: (messageId: string) => api.delete(`/messages/${messageId}`),
 
-  search: (conversationId: string, query: string) => {
-    const params = new URLSearchParams({ q: query });
-    return api
-      .get<Message[]>(`/conversations/${conversationId}/messages/search?${params}`)
-      .then((r) => r.data);
-  },
+  // ARCH FIX (§7): search() removed — the server-side search endpoint has been
+  // deleted because message content is AES-GCM ciphertext and LIKE matching on it
+  // is meaningless (and a match would imply plaintext leaked to the server).
+  // Implement search client-side by filtering the already-decrypted message list
+  // that lives in the useInfiniteQuery cache in ChatView.
 
   uploadFile: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
     return api
-      .post<{ fileName: string; fileUrl: string; contentType: string; size: number }>('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      .post<{ fileName: string; fileUrl: string; contentType: string; size: number }>(
+        '/files/upload',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
       .then((r) => r.data);
   },
 };

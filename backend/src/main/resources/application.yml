@@ -11,7 +11,6 @@ spring:
   h2:
     console:
       enabled: false
-      path: /h2-console
 
   jpa:
     hibernate:
@@ -47,8 +46,11 @@ spring:
 server:
   port: 8080
   error:
-    include-message: always
-    include-binding-errors: always
+    # P2-006 fix: Do NOT expose error messages/stack traces to clients
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
 
 # JWT Configuration
 app:
@@ -59,9 +61,14 @@ app:
   cors:
     allowed-origins: "http://localhost:5173"
   frontend-url: "http://localhost:5173"
-  h2-console-url: "http://localhost:8080/h2-console"
+  security:
+    # SECURITY FIX (§2): Comma-separated list of trusted reverse-proxy CIDRs.
+    # X-Forwarded-For is ONLY consulted when the direct peer IP is in this list.
+    # Empty (default) = never trust XFF, always use remoteAddr directly.
+    # Example for a typical private-network LB: "10.0.0.0/8, 172.16.0.0/12"
+    trusted-proxies: ""
 
-# Actuator
+# Actuator — minimal exposure
 management:
   endpoints:
     web:
@@ -71,10 +78,11 @@ management:
     health:
       show-details: when_authorized
 
+# P2-011 fix: Security logging at WARN in default profile (not DEBUG)
 logging:
   level:
-    com.relay: DEBUG
-    org.springframework.security: DEBUG
+    com.relay: INFO
+    org.springframework.security: WARN
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
@@ -93,3 +101,15 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
+---
+# Dev profile — enables DEBUG logging and data seeding
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+logging:
+  level:
+    com.relay: DEBUG
+    org.springframework.security: DEBUG

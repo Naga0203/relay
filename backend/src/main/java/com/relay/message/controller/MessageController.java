@@ -7,14 +7,12 @@ import com.relay.message.dto.MessageResponse;
 import com.relay.message.dto.SendMessageRequest;
 import com.relay.message.service.MessageService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -58,11 +56,15 @@ public class MessageController {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/conversations/{conversationId}/messages/search")
-    public ResponseEntity<List<MessageResponse>> searchMessages(
-            @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable UUID conversationId,
-            @RequestParam @Size(min = 1, max = 200, message = "Search query must be 1-200 characters") String q) {
-        return ResponseEntity.ok(messageService.searchMessages(principal, conversationId, q));
-    }
+    // ARCH FIX (§7): GET /conversations/{id}/messages/search REMOVED.
+    //
+    // Message content is AES-GCM-256 ciphertext with a random IV per message.
+    // LOWER(content) LIKE LOWER('%query%') can never match — this endpoint was
+    // dead code.  Worse, if it ever *did* match something, that would indicate
+    // plaintext had leaked to the server, which is a more serious problem.
+    //
+    // Message search is implemented client-side: the React ChatView already loads
+    // and decrypts messages locally via useInfiniteQuery; filter the decrypted text
+    // in-memory there.  The limitation (search covers only already-loaded history)
+    // should be documented in the UI if a search feature is surfaced to users.
 }

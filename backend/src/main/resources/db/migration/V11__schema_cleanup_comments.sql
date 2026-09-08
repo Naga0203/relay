@@ -1,0 +1,31 @@
+-- ARCH FIX (§12e): Documentation-only migration — no schema changes.
+--
+-- The following tables were created in earlier migrations but have no corresponding
+-- JPA entities, repositories, or controllers as of this audit pass:
+--
+--   message_reactions  (V3)
+--     Status: DEFERRED — planned for a future "emoji reactions" feature.
+--     Decision: Keep the table; implementing the feature is out of scope for this
+--     security hardening PR.  Track in backlog as "Implement message reactions".
+--
+--   message_attachments  (V3)
+--     Status: SUPERSEDED — file attachments are handled entirely through the
+--     files upload service (FileStorageService / FileController).  The attachment
+--     URL is embedded in the encrypted message content as a /api/v1/files/{id} URL.
+--     Decision: Keep for now but do not implement a separate attachment model.
+--     If a structured attachment model is needed later, migrate URLs from message
+--     content into this table.  Revisit in the next architecture review.
+--
+--   notifications  (V4)
+--     Status: DEFERRED — planned for a future in-app notification system.
+--     Decision: Keep the table; implementing the feature is out of scope for this
+--     security hardening PR.  Track in backlog as "Implement in-app notifications".
+--
+-- Leaving dead schema in place is acceptable only when:
+--   1. The table is documented here (this migration).
+--   2. There is an explicit backlog item or decision to either implement or drop it.
+-- Do not add further undocumented tables without a corresponding implementation plan.
+
+-- This statement is a no-op; it exists only so Flyway records that this decision
+-- was reviewed at migration V11.
+SELECT 1;

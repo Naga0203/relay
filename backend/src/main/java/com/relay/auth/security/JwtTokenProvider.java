@@ -35,6 +35,9 @@ public class JwtTokenProvider {
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("email", email)
+                .issuer("relay-chat")
+                .audience().add("relay-api").and()
+                .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(key)
@@ -48,6 +51,12 @@ public class JwtTokenProvider {
     public UUID getUserIdFromToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
+                // SECURITY FIX (§12d): Validate issuer and audience on parse, not just at
+                // creation time.  Without these checks a token issued by a different service
+                // (or a future relay instance with a different issuer string) would be accepted
+                // as valid, because jjwt only checks claims at parse time if explicitly required.
+                .requireIssuer("relay-chat")
+                .requireAudience("relay-api")
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
@@ -56,7 +65,14 @@ public class JwtTokenProvider {
 
     public boolean validateToken(String token) {
         try {
-            Jwts.parser().verifyWith(key).build().parseSignedClaims(token);
+            Jwts.parser()
+                    .verifyWith(key)
+                    // SECURITY FIX (§12d): Same issuer/audience requirement on the validation
+                    // path used by JwtAuthenticationFilter on every authenticated request.
+                    .requireIssuer("relay-chat")
+                    .requireAudience("relay-api")
+                    .build()
+                    .parseSignedClaims(token);
             return true;
         } catch (JwtException | IllegalArgumentException e) {
             log.warn("Invalid JWT token: {}", e.getMessage());

@@ -37,6 +37,9 @@ public class User {
     @Builder.Default
     private String status = "AVAILABLE";
 
+    @Column(name = "public_key", length = 2000)
+    private String publicKey;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

@@ -5,12 +5,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
-import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.QueryHints;
-
-import jakarta.persistence.LockModeType;
-import jakarta.persistence.QueryHint;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,17 +20,15 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
            "ORDER BY m.sequenceNumber DESC")
     List<Message> findByConversationIdBefore(UUID conversationId, Long beforeSequence, Pageable pageable);
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT COALESCE(MAX(m.sequenceNumber), 0) FROM Message m WHERE m.conversation.id = :conversationId")
-    @QueryHints({@QueryHint(name = "jakarta.persistence.lock.timeout", value = "5000")})
-    Long findMaxSequenceNumberForUpdate(UUID conversationId);
+    // ARCH FIX (§1): findMaxSequenceNumberForUpdate REMOVED — replaced by the atomic
+    // UPDATE on conversations.next_sequence in ConversationRepository.  The old query
+    // acquired no row lock when the messages table was empty, allowing two concurrent
+    // first-messages to both compute sequenceNumber = 1.
 
     Optional<Message> findByIdempotencyKey(String idempotencyKey);
 
-    @Query("SELECT m FROM Message m WHERE m.conversation.id = :conversationId " +
-           "AND m.deletedAt IS NULL " +
-           "AND m.content IS NOT NULL " +
-           "AND LOWER(m.content) LIKE LOWER(CONCAT('%', :query, '%')) " +
-           "ORDER BY m.createdAt DESC")
-    List<Message> searchInConversation(UUID conversationId, String query, Pageable pageable);
+    // ARCH FIX (§7): searchInConversation REMOVED — message content is AES-GCM ciphertext,
+    // so LIKE '%query%' can never match plaintext.  The method was dead code and misleading
+    // (a match would imply plaintext leaked to the server).  Search is done client-side on
+    // already-decrypted message history.
 }

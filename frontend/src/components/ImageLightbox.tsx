@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { X, ExternalLink, Download } from 'lucide-react';
+import { X, Download } from 'lucide-react';
 
 interface Props {
   src: string;
@@ -7,6 +7,24 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * Full-screen image overlay.
+ *
+ * SECURITY FIX (§5): The "Open Original" button that used to do
+ *   <a href={src} target="_blank" rel="noopener noreferrer">
+ * has been removed.  That link navigated to the raw file URL as a top-level
+ * same-origin document.  Because SVG (and potentially other content types) can
+ * contain <script> tags, that navigation would have executed attacker-controlled
+ * JavaScript in the relay app's origin, allowing exfiltration of access tokens /
+ * refresh tokens / E2EE private keys from localStorage and IndexedDB.
+ *
+ * The only action now available is "Download", which uses the `download` attribute
+ * to trigger a save-dialog rather than navigation.  For blob: URLs (already-decrypted
+ * images held in memory) the browser will honour the download attribute directly.
+ * For same-origin /api/v1/files/ URLs the server now also responds with
+ * Content-Disposition: attachment for non-image types (FileController fix), providing
+ * defence-in-depth even if someone finds another way to trigger navigation.
+ */
 export function ImageLightbox({ src, alt = 'Media', onClose }: Props) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -23,16 +41,7 @@ export function ImageLightbox({ src, alt = 'Media', onClose }: Props) {
     >
       {/* Top Toolbar */}
       <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-        <a
-          href={src}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          title="Open Original"
-          className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-        >
-          <ExternalLink className="w-5 h-5" />
-        </a>
+        {/* SECURITY FIX (§5): download-only — no target="_blank" navigation to user content */}
         <a
           href={src}
           download

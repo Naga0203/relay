@@ -5,11 +5,12 @@ import { encryptFile, encryptText } from '../lib/e2eCrypto';
 
 interface Props {
   conversationId: string;
+  peerPublicKey?: string;
   onSuccess: () => void;
   onClose: () => void;
 }
 
-export function ImageUploadModal({ conversationId, onSuccess, onClose }: Props) {
+export function ImageUploadModal({ conversationId, peerPublicKey = '', onSuccess, onClose }: Props) {
   const [tab, setTab] = useState<'upload' | 'url'>('upload');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
@@ -57,8 +58,8 @@ export function ImageUploadModal({ conversationId, onSuccess, onClose }: Props) 
           setLoading(false);
           return;
         }
-        // Client-side E2EE file payload encryption
-        const encryptedFile = await encryptFile(selectedFile, conversationId);
+        // Client-side E2EE file payload encryption with ECDH peer key
+        const encryptedFile = await encryptFile(selectedFile, conversationId, peerPublicKey);
         const uploadRes = await messageApi.uploadFile(encryptedFile);
         finalImageUrl = uploadRes.fileUrl;
       } else {
@@ -75,8 +76,8 @@ export function ImageUploadModal({ conversationId, onSuccess, onClose }: Props) 
         ? `${finalImageUrl}\n${caption.trim()}`
         : finalImageUrl;
 
-      // Encrypt final message payload with AES-GCM 256-bit
-      const encryptedContent = await encryptText(content, conversationId);
+      // Encrypt final message payload with AES-GCM 256-bit using peer ECDH key
+      const encryptedContent = await encryptText(content, conversationId, peerPublicKey);
 
       await messageApi.send(conversationId, {
         content: encryptedContent,

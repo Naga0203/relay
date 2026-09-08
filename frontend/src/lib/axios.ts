@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../stores/authStore';
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -51,24 +52,27 @@ api.interceptors.response.use(
       if (refreshToken) {
         try {
           const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken });
-          localStorage.setItem('accessToken', data.accessToken);
-          localStorage.setItem('refreshToken', data.refreshToken);
+
+          // ARCH FIX (§12c): Route token updates through the Zustand store action
+          // instead of writing to localStorage directly.  This keeps in-memory state
+          // and persisted state in sync — any component observing the store will see
+          // the latest token state rather than stale values from before the refresh.
+          useAuthStore.getState().updateTokens(data.accessToken, data.refreshToken);
+
           processQueue(null, data.accessToken);
           originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
           return api(originalRequest);
         } catch (err) {
           processQueue(err, null);
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
-          localStorage.removeItem('user');
+          // On refresh failure, perform a full logout through the store so all state
+          // (in-memory + localStorage) is cleared atomically.
+          useAuthStore.getState().logout();
           if (window.location.pathname !== '/login') {
             window.location.href = '/login';
           }
         }
       } else {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        localStorage.removeItem('user');
+        useAuthStore.getState().logout();
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
         }

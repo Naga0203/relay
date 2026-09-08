@@ -15,6 +15,6 @@ public record CreateConversationRequest(
         String name,
 
         @NotNull(message = "Member IDs are required")
-        @Size(min = 1, message = "At least one member is required")
+        @Size(min = 1, max = 256, message = "Conversations must have 1-256 members")
         List<UUID> memberIds
 ) {}

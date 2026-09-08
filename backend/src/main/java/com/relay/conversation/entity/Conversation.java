@@ -50,6 +50,13 @@ public class Conversation {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    // ARCH FIX (§1): Dedicated per-conversation sequence counter.
+    // Updated atomically in MessageService via a native UPDATE…RETURNING query so
+    // there is never a window where two concurrent inserts can claim the same number.
+    @Column(name = "next_sequence", nullable = false)
+    @Builder.Default
+    private Long nextSequence = 1L;
+
     public enum ConversationType {
         DIRECT, GROUP
     }
