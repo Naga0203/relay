@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Relay - Landing</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#ffdad6",
+                        "surface-container-high": "#222a3d",
+                        "on-tertiary": "#003915",
+                        "tertiary-fixed": "#6bff8f",
+                        "inverse-on-surface": "#283044",
+                        "on-surface-variant": "#bdc8d1",
+                        "on-secondary-fixed-variant": "#39485a",
+                        "surface": "#0b1326",
+                        "tertiary-container": "#2ccb63",
+                        "primary-fixed-dim": "#7bd0ff",
+                        "on-tertiary-container": "#004f20",
+                        "on-tertiary-fixed": "#002109",
+                        "tertiary-fixed-dim": "#4ae176",
+                        "error": "#ffb4ab",
+                        "on-primary-fixed": "#001e2c",
+                        "on-background": "#dae2fd",
+                        "secondary-fixed-dim": "#b9c8de",
+                        "on-secondary-container": "#a7b6cc",
+                        "surface-dim": "#0b1326",
+                        "secondary-fixed": "#d4e4fa",
+                        "surface-container": "#171f33",
+                        "secondary": "#b9c8de",
+                        "on-surface": "#dae2fd",
+                        "primary-container": "#38bdf8",
+                        "inverse-primary": "#00668a",
+                        "surface-container-lowest": "#060e20",
+                        "secondary-container": "#39485a",
+                        "on-error": "#690005",
+                        "surface-container-low": "#131b2e",
+                        "error-container": "#93000a",
+                        "tertiary": "#52e87c",
+                        "surface-container-highest": "#2d3449",
+                        "on-primary-fixed-variant": "#004c69",
+                        "on-primary": "#00354a",
+                        "background": "#0b1326",
+                        "on-secondary-fixed": "#0d1c2d",
+                        "outline-variant": "#3e484f",
+                        "primary": "#8ed5ff",
+                        "surface-bright": "#31394d",
+                        "on-secondary": "#233143",
+                        "inverse-surface": "#dae2fd",
+                        "surface-variant": "#2d3449",
+                        "surface-tint": "#7bd0ff",
+                        "on-primary-container": "#004965",
+                        "outline": "#87929a",
+                        "primary-fixed": "#c4e7ff",
+                        "on-tertiary-fixed-variant": "#005321"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "thread-indent": "48px",
+                        "md": "16px",
+                        "message-gap": "4px",
+                        "xl": "32px",
+                        "unit": "4px",
+                        "sm": "8px",
+                        "xs": "4px",
+                        "lg": "24px",
+                        "sidebar-width": "260px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Hanken Grotesk"],
+                        "label-md": ["Hanken Grotesk"],
+                        "code-sm": ["monospace"],
+                        "body-lg": ["Hanken Grotesk"],
+                        "body-md": ["Hanken Grotesk"],
+                        "display-sm": ["Hanken Grotesk"],
+                        "headline-lg": ["Hanken Grotesk"],
+                        "headline-sm": ["Hanken Grotesk"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["13px", { "lineHeight": "18px", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "code-sm": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "letterSpacing": "0em", "fontWeight": "400" }],
+                        "display-sm": ["30px", { "lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "headline-lg": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.015em", "fontWeight": "600" }],
+                        "headline-sm": ["18px", { "lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "600" }]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface h-screen w-full overflow-hidden flex font-body-md antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-0 h-full w-sidebar-width border-r border-outline-variant bg-surface-container-lowest z-20 flex flex-col hidden md:flex">
+<!-- Workspace Header -->
+<div class="px-md py-md border-b border-outline-variant/30 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container font-headline-sm font-bold">
+                    R
+                </div>
+<div>
+<h1 class="font-headline-sm text-headline-sm text-on-surface font-bold leading-none">Relay</h1>
+<span class="text-label-md font-label-md text-primary mt-1 block">Active Now</span>
+</div>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<div class="flex-1 py-sm overflow-y-auto custom-scrollbar">
+<ul class="space-y-xs px-xs">
+<li>
+<button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md font-medium hover:bg-surface-container-high transition-colors duration-150 cursor-pointer active:scale-95">
+<span class="material-symbols-outlined text-[18px]">grid_view</span>
+                        Workspaces
+                    </button>
+</li>
+<li>
+<button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-primary font-bold border-l-2 border-primary bg-surface-container-low transition-colors duration-150 cursor-pointer active:scale-95">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">chat</span>
+                        DMs
+                    </button>
+</li>
+<li>
+<button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md font-medium hover:bg-surface-container-high transition-colors duration-150 cursor-pointer active:scale-95">
+<span class="material-symbols-outlined text-[18px]">notifications</span>
+                        Activity
+                    </button>
+</li>
+<li>
+<button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md font-medium hover:bg-surface-container-high transition-colors duration-150 cursor-pointer active:scale-95">
+<span class="material-symbols-outlined text-[18px]">alternate_email</span>
+                        Mentions
+                    </button>
+</li>
+<li>
+<button class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant font-label-md text-label-md font-medium hover:bg-surface-container-high transition-colors duration-150 cursor-pointer active:scale-95">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+                        More
+                    </button>
+</li>
+</ul>
+</div>
+<!-- User Profile Area -->
+<div class="p-4 border-t border-outline-variant/30 mt-auto hover:bg-surface-container-high transition-colors cursor-pointer">
+<div class="flex items-center gap-3">
+<div class="relative">
+<img class="w-8 h-8 rounded-full object-cover border border-outline-variant" data-alt="A close up, cinematic portrait of a professional in a dark studio setting. The lighting is moody and high contrast, using a deep navy blue background and cool rim lights to match a high-end, premium technical aesthetic. The person looks focused." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBBelflO8ATo1cgSvAr9iieCuQXUDBZCJcTy6LAsInQ-t-GLXa3uIgtLVqlXwjMy3fDFhTsl_1hLhtt4XZeyd17cm5HDUfcrjcGvd8KdBRTVL8M80O-Bfjtc-pgbKCFxUms2iDt6GOJukyT6lfKX2OYkmph4dv_30t-oKNcFS-mCT2g6-atEf5vmOyqIVtEsGshUoWtj2SaxDc_AGShIYba4cO0R2akQm1UF1faZRLBkxn9Eqr0MrbwVQ"/>
+<div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-tertiary rounded-full border-[2px] border-surface-container-lowest"></div>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-body-sm font-body-sm text-on-surface truncate">Alex Mercer</p>
+<p class="text-label-md font-label-md text-on-surface-variant truncate">Set status...</p>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Area (Next to Sidebar) -->
+<div class="flex-1 ml-0 md:ml-sidebar-width flex flex-col min-w-0 bg-surface h-full">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-lg h-[64px] border-b border-outline-variant bg-surface z-10 shrink-0">
+<div class="flex-1 max-w-md">
+<div class="relative group focus-within:ring-1 focus-within:ring-primary rounded-lg transition-shadow">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[18px]">search</span>
+<input class="w-full bg-surface-container-high border-none text-body-sm font-body-sm text-on-surface placeholder:text-on-surface-variant rounded-lg pl-10 pr-4 py-1.5 focus:ring-0 focus:outline-none transition-colors group-hover:bg-surface-container-highest" placeholder="Search Relay..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4 ml-md hidden sm:flex">
+<button class="text-on-surface-variant hover:text-primary transition-all p-1 rounded hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[20px]">help</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-all p-1 rounded hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</button>
+</div>
+</header>
+<!-- Main Workspace View (DMs List + Empty State) -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Secondary Sidebar: Conversations List -->
+<aside class="w-[300px] border-r border-outline-variant bg-surface-container-low flex flex-col shrink-0 overflow-y-auto">
+<div class="p-md flex justify-between items-center sticky top-0 bg-surface-container-low/90 backdrop-blur z-10">
+<h2 class="text-headline-sm font-headline-sm font-bold text-on-surface">Direct Messages</h2>
+<button class="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">edit_square</span>
+</button>
+</div>
+<div class="px-sm pb-md space-y-px">
+<!-- DM Item -->
+<button class="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-surface-container-high transition-colors text-left group">
+<div class="relative mt-1">
+<img class="w-8 h-8 rounded object-cover" data-alt="A portrait of a woman in a cyberpunk lit environment, soft neon blues and purples. She is looking slightly off camera. High contrast, sharp details, premium dark mode aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDLqsNWtbG_4n7TpqDy-8H3i3-Kp4Kzh2A50A3GpZHwbe6uRwNb5vUJZtu9_oUoKV835OcLEPMqFmjJRllqt5Jso0Ey8zlQCAPAlJ-fcmb_TrRzsBvd4go8k9y9SCswMnpukshuK5UT4jB8HojdycjeGWoBqtbaTINWpWG0Hsmwtovg9_7MKoaRTBjrsyox0xdy37IPeLjIcpFBkh2AR9YLcXcrqecF4FFO1z_d2h2I-oYxkl3OBrUOmQ"/>
+<div class="absolute -bottom-1 -right-1 w-3 h-3 bg-tertiary rounded-full border-2 border-surface-container-low"></div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<span class="text-body-sm font-body-sm font-medium text-on-surface truncate">Sarah Chen</span>
+<span class="text-label-md font-label-md text-on-surface-variant">2m</span>
+</div>
+<p class="text-body-sm font-body-sm text-on-surface-variant truncate">The deployment looks good on staging.</p>
+</div>
+</button>
+<!-- DM Item (Unread) -->
+<button class="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-surface-container-high transition-colors text-left group">
+<div class="relative mt-1">
+<img class="w-8 h-8 rounded object-cover" data-alt="A minimalist rendering of a stylized robot or avatar head, created with smooth matte materials in shades of charcoal and ice blue. The lighting is precise and technical, casting soft shadows." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCh7a9DNyWI5pfFCT6epzD9gIv8AprjLVjhmb0ta0xylmHNL2bYqVPAMdl7BTqLMSzKqep6Co9Cx4n2g7NGovjMWA6oh8kd_vf2B1s3GsjCg9TfJqFBylg14epEQp5zgbLa2DStq-48B1lZJ6uMbeUvtGGZ5WJxOty25O2Z_UCRkb7X1VM60wr48g4OWzxYcgkTUnL-B3mPhUKpTEajqe-gysW0ylQ2XU_SpEwCB0II2T4_gORpToc8WA"/>
+<div class="absolute -bottom-1 -right-1 w-3 h-3 bg-surface-container-low rounded-full border-2 border-surface-container-low flex items-center justify-center">
+<span class="w-1.5 h-1.5 rounded-full border border-outline"></span>
+</div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<span class="text-body-sm font-body-sm font-bold text-on-surface truncate">Design Team</span>
+<span class="text-label-md font-label-md text-primary font-bold">1h</span>
+</div>
+<p class="text-body-sm font-body-sm text-primary font-medium truncate">Can we review the new tokens?</p>
+</div>
+<div class="mt-2 w-2 h-2 rounded-full bg-primary shrink-0"></div>
+</button>
+<!-- DM Item -->
+<button class="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-surface-container-high transition-colors text-left group">
+<div class="relative mt-1">
+<div class="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center text-on-surface-variant font-medium text-body-sm">
+                                MK
+                            </div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-0.5">
+<span class="text-body-sm font-body-sm font-medium text-on-surface-variant truncate">Marcus King</span>
+<span class="text-label-md font-label-md text-on-surface-variant">Yesterday</span>
+</div>
+<p class="text-body-sm font-body-sm text-on-surface-variant truncate">Got it, thanks.</p>
+</div>
+</button>
+</div>
+</aside>
+<!-- Main Canvas: Empty State -->
+<main class="flex-1 flex flex-col items-center justify-center p-lg relative bg-surface">
+<div class="max-w-md w-full flex flex-col items-center text-center">
+<div class="w-32 h-32 mb-6 text-surface-container-highest relative">
+<span class="material-symbols-outlined text-[128px] absolute inset-0 text-outline-variant/20">
+                            mark_chat_unread
+                        </span>
+<span class="material-symbols-outlined text-[64px] absolute bottom-4 right-4 text-primary bg-surface rounded-full p-2 border-4 border-surface">
+                            add_comment
+                        </span>
+</div>
+<h2 class="text-display-sm font-display-sm text-on-surface mb-3">Your workspace</h2>
+<p class="text-body-lg font-body-lg text-on-surface-variant mb-8 max-w-sm">
+                        Select a conversation from the sidebar or start a new message to get the ball rolling.
+                    </p>
+<button class="bg-primary text-on-primary px-6 py-2.5 rounded-lg font-label-md text-label-md font-bold hover:bg-primary-fixed transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">edit_square</span>
+                        New Message
+                    </button>
+</div>
+</main>
+</div>
+</div>
+</body></html>
