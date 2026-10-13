@@ -12,29 +12,6 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **Relay** is a high-performance, enterprise-grade, privacy-first real-time messaging application designed with a **Zero-Knowledge Architecture**. All messages, images, GIFs, and file attachments are encrypted client-side using **Web Crypto API AES-GCM 256-bit** authenticated encryption before transmission. The backend server acts strictly as an authenticated zero-knowledge relay, ensuring true confidentiality against server eavesdropping and man-in-the-middle attacks.
-
----
-
-## 📸 Interface Preview
-
-<div align="center">
-  <img src="./Screens/direct_message_alex_rivera_updated_theme.png" alt="Direct Messaging View" width="85%" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
-</div>
-
-<p align="center">
-  <em>Modern, responsive interface featuring end-to-end encryption, typing indicators, rich media preview, and user status indicators.</em>
-</p>
-
-<details>
-<summary><b>🔍 View Additional Screen Previews</b></summary>
-<br/>
-
-| Dashboard & Conversations | Group Discussions | Search & Discovery |
-| :---: | :---: | :---: |
-| <img src="./Screens/relay_dashboard_updated_theme.png" width="300" /> | <img src="./Screens/group_chat_engineering_team_updated_theme.png" width="300" /> | <img src="./Screens/search_results_updated_theme.png" width="300" /> |
-
-</details>
-
 ---
 
 ## 🌟 Key Highlights

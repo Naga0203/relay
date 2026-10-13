@@ -15,6 +15,7 @@
 .vscode/
 .idea/
 .claude/
+.screens/
 *.swp
 *.cls
 *.sublime-*
