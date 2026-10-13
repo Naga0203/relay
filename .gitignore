@@ -11,31 +11,52 @@
 **/build/
 .npm
 
-# IDE and Editor files
+# IDE, Editor, and AI tooling
 .vscode/
 .idea/
 .claude/
 *.swp
 *.cls
+*.sublime-*
+.fleet/
 
 # OS generated files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Uploaded files
 **/uploads/
 uploads/
 
-# Logs
+# Logs & dumps
 *.log
+*.dump
+*.dumpstream
 
-# Environments
+# Environments and Secrets
 .env
+.env.*
 **/.env
+**/.env.*
 !.env.example
 !**/.env.example
 
-# Local tools & database dumps
+# Credentials & Certificates
+*.pem
+*.key
+*.pkcs12
+*.pfx
+*.p12
+*.jks
+*credentials.json
+client_secret*.json
+
+# Local tools, binaries, and database dumps
 redis/
+*.exe
+*.dll
+*.pdb
 *.rdb
+
 
