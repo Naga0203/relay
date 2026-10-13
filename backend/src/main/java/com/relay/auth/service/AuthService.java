@@ -40,23 +40,38 @@ public class AuthService {
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        // SECURITY FIX (§6): Normalise email to lowercase at the point of write so
-        // that "User@Example.com" and "user@example.com" are always treated as the
-        // same identity.  All subsequent lookups use the normalised value.
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        if (!request.password().equals(request.confirmPassword())) {
+            throw ApiException.badRequest("Passwords do not match");
+        }
 
+        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
         if (userRepository.existsByEmail(normalizedEmail)) {
             throw ApiException.conflict("Email already registered");
         }
 
+        String normalizedUsername = request.username().trim().toLowerCase(Locale.ROOT);
+        if (userRepository.existsByUsernameIgnoreCase(normalizedUsername)) {
+            throw ApiException.conflict("Username already exists");
+        }
+
+        int age = request.age();
+        if (age < 1 || age > 125) {
+            throw ApiException.badRequest("Please enter a valid age");
+        }
+        String accountType = (age < 18) ? "MINOR" : "MAJOR";
+
         User user = User.builder()
                 .name(request.name().trim())
+                .username(normalizedUsername)
                 .email(normalizedEmail)
+                .age(age)
+                .gender(request.gender().trim())
+                .accountType(accountType)
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .build();
 
         user = userRepository.save(user);
-        log.info("User registered: {}", normalizedEmail);
+        log.info("User registered: {} (@{}, {})", normalizedEmail, normalizedUsername, accountType);
 
         return createAuthResponse(user);
     }
@@ -65,30 +80,28 @@ public class AuthService {
 
     @Transactional
     public AuthResponse login(LoginRequest request) {
-        // SECURITY FIX (§6): Normalise email on every login attempt so lookups are
-        // case-insensitive regardless of what the caller sends.
-        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        String normalizedIdentifier = request.email().trim().toLowerCase(Locale.ROOT);
 
         // SECURITY FIX (§4): Distributed lockout check via Redis-backed service.
-        if (lockoutService.isLockedOut(normalizedEmail)) {
-            long minutesLeft = lockoutService.remainingLockoutMinutes(normalizedEmail);
+        if (lockoutService.isLockedOut(normalizedIdentifier)) {
+            long minutesLeft = lockoutService.remainingLockoutMinutes(normalizedIdentifier);
             throw ApiException.forbidden(
                     "Account locked due to multiple failed login attempts. " +
                     "Try again in " + minutesLeft + " minutes.");
         }
 
-        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+        User user = userRepository.findByEmailOrUsername(normalizedIdentifier).orElse(null);
 
         if (user == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             // SECURITY FIX (§4): Record failure with client IP for distributed-attack detection.
-            lockoutService.recordFailure(normalizedEmail, resolveClientIp());
+            lockoutService.recordFailure(normalizedIdentifier, resolveClientIp());
             throw ApiException.unauthorized("Invalid email or password");
         }
 
         // Reset failure state on successful login.
-        lockoutService.clearFailures(normalizedEmail);
+        lockoutService.clearFailures(normalizedIdentifier);
 
-        log.info("User logged in: {}", normalizedEmail);
+        log.info("User logged in: {}", user.getEmail());
         return createAuthResponse(user);
     }
 

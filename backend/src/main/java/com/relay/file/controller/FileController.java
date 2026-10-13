@@ -43,17 +43,17 @@ public class FileController {
             "image/jpeg",
             "image/png",
             "image/gif",
-            "image/webp"
+            "image/webp",
+            "video/mp4",
+            "video/webm",
+            "video/quicktime"
     );
 
     @PostMapping("/upload")
     public ResponseEntity<FileUploadResponse> uploadFile(@RequestParam("file") MultipartFile file) {
         String fileName = fileStorageService.storeFile(file);
 
-        String fileUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/api/v1/files/")
-                .path(fileName)
-                .toUriString();
+        String fileUrl = "/api/v1/files/" + fileName;
 
         return ResponseEntity.ok(new FileUploadResponse(
                 fileName,

@@ -44,9 +44,9 @@ export function ImageLightbox({ src, alt = 'Media', onClose }: Props) {
         {/* SECURITY FIX (§5): download-only — no target="_blank" navigation to user content */}
         <a
           href={src}
-          download
+          download="relay_image.png"
           onClick={(e) => e.stopPropagation()}
-          title="Download"
+          title="Download image"
           className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
         >
           <Download className="w-5 h-5" />

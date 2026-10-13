@@ -1,22 +1,30 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { messageApi } from './api';
+import { conversationApi } from '../conversations/api';
 import { useAuthStore } from '../../stores/authStore';
 import type { Conversation, Message, SendMessageRequest } from '../../types';
-import { Send, Loader2, ArrowDown, Smile, Image as ImageIcon, Film, ShieldCheck, Lock } from 'lucide-react';
+import { Send, Loader2, ArrowDown, Smile, Image as ImageIcon, Film, Link as LinkIcon, ShieldCheck, ShieldAlert, Lock, Download, FileText } from 'lucide-react';
 import { EmojiPicker } from '../../components/EmojiPicker';
 import { GifPicker } from '../../components/GifPicker';
-import { ImageUploadModal } from '../../components/ImageUploadModal';
+import { MediaUploadModal } from '../../components/MediaUploadModal';
 import { ImageLightbox } from '../../components/ImageLightbox';
 import { SecurityCodeModal } from '../../components/SecurityCodeModal';
 import { KeyChangeWarningBanner } from '../../components/KeyChangeWarningBanner';
+import { userApi } from '../profile/api';
 import {
   decryptText,
   decryptFileToUrl,
+  decryptFileForGroup,
   isEncrypted,
   checkAndPinPeerKey,
   encryptMessageForGroup,
   decryptGroupMessage,
+  exportPublicKey,
+  detectMimeType,
+  detectFileExtension,
+  isImageMimeType,
+  isVideoMimeType,
 } from '../../lib/e2eCrypto';
 import { useKeyVerificationStore } from '../../stores/keyVerificationStore';
 
@@ -28,23 +36,63 @@ interface Props {
 interface DecryptedItemProps {
   msg: Message;
   conversationId: string;
+  senderPublicKey: string;
   peerPublicKey: string;
+  peerUserId?: string;
   isOwn: boolean;
   formatTime: (iso: string) => string;
   setLightboxSrc: (src: string) => void;
 }
 
 /**
+ * Returns display info for a file based on its MIME type, used for the generic file card.
+ */
+function getFileInfoFromMime(mimeType: string, fileUrl: string) {
+  const ext = detectFileExtension(fileUrl).replace('.', '').toUpperCase();
+  const fileName = fileUrl.split('/').pop()?.replace('.enc', '') || 'download';
+
+  // Pick icon based on MIME type
+  let icon = FileText;
+  let sizeLabel = ext || 'File';
+
+  if (mimeType.startsWith('image/')) icon = ImageIcon;
+  else if (mimeType.startsWith('video/')) icon = Film;
+  else if (mimeType === 'application/pdf') { icon = FileText; sizeLabel = 'PDF'; }
+  else if (mimeType.includes('word') || mimeType === 'application/msword') { icon = FileText; sizeLabel = 'Word'; }
+  else if (mimeType.includes('spreadsheet') || mimeType === 'application/vnd.ms-excel') { icon = FileText; sizeLabel = 'Excel'; }
+  else if (mimeType.includes('presentation') || mimeType === 'application/vnd.ms-powerpoint') { icon = FileText; sizeLabel = 'PowerPoint'; }
+  else if (mimeType === 'application/zip' || mimeType.includes('rar') || mimeType.includes('7z') || mimeType.includes('tar') || mimeType.includes('gzip')) {
+    icon = FileText; sizeLabel = 'Archive';
+  }
+  else if (mimeType === 'application/vnd.android.package-archive') { icon = FileText; sizeLabel = 'APK'; }
+  else { sizeLabel = ext || 'File'; }
+
+  return { icon, name: fileName, sizeLabel };
+}
+
+/**
  * Sub-component for rendering single decrypted E2EE messages and attachments.
  */
-function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, formatTime, setLightboxSrc }: DecryptedItemProps) {
+function DecryptedMessageItem({
+  msg,
+  conversationId,
+  senderPublicKey,
+  peerPublicKey,
+  peerUserId,
+  isOwn,
+  formatTime,
+  setLightboxSrc,
+}: DecryptedItemProps) {
   const [decryptedText, setDecryptedText] = useState<string>('');
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
   const [loadingMedia, setLoadingMedia] = useState<boolean>(false);
+  const [mediaError, setMediaError] = useState<boolean>(false);
+  const [gifError, setGifError] = useState<boolean>(false);
 
   const encrypted = isEncrypted(msg.content);
 
   // ARCH FIX (§9): Use group decryption when recipientKeys are present on the message.
+  // Unwraps using the message sender's public key (senderPublicKey).
   // Falls back to legacy pairwise decryptText for older messages without wrapped keys.
   useEffect(() => {
     let isMounted = true;
@@ -54,14 +102,36 @@ function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, forma
         return;
       }
       // Determine the current user's wrapped key (if available).
-      const myWrappedKey = msg.recipientKeys?.[useAuthStore.getState().user?.id ?? ''] ?? null;
+      const currentUserId = useAuthStore.getState().user?.id ?? '';
+      const myWrappedKey = msg.recipientKeys?.[currentUserId] ?? null;
       let plain: string;
       if (myWrappedKey) {
-        // §9 fan-out decryption path
-        plain = await decryptGroupMessage(msg.content, conversationId, peerPublicKey, myWrappedKey);
+        let activeSenderKey = senderPublicKey;
+        if (!activeSenderKey) {
+          try {
+            const keyRes = await userApi.getPublicKey(msg.senderId);
+            activeSenderKey = keyRes?.publicKey || '';
+          } catch { /* ignore */ }
+        }
+        // §9 fan-out decryption path: derive pairwise key with the message sender
+        plain = await decryptGroupMessage(msg.content, conversationId, activeSenderKey, myWrappedKey, currentUserId);
+      } else if (msg.recipientKeys && Object.keys(msg.recipientKeys).length > 0) {
+        // Message was encrypted with fan-out keys, but this user was not included in recipients
+        plain = '[Message was not encrypted for this account — sender sent before your encryption keys were available]';
       } else {
-        // Legacy pairwise decryption path
-        plain = await decryptText(msg.content, conversationId, peerPublicKey);
+        // Legacy pairwise decryption path:
+        // For pairwise, derive with the other party's key (peer for own messages, sender for incoming)
+        let fallbackKey = isOwn ? peerPublicKey : senderPublicKey;
+        if (!fallbackKey) {
+          try {
+            const targetId = isOwn ? peerUserId : msg.senderId;
+            if (targetId) {
+              const res = await userApi.getPublicKey(targetId);
+              fallbackKey = res?.publicKey || '';
+            }
+          } catch { /* ignore */ }
+        }
+        plain = await decryptText(msg.content, conversationId, fallbackKey, currentUserId);
       }
       if (isMounted) {
         setDecryptedText(plain);
@@ -71,18 +141,23 @@ function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, forma
     return () => {
       isMounted = false;
     };
-  }, [msg.content, conversationId, peerPublicKey, msg.recipientKeys]);
+  }, [msg.content, conversationId, senderPublicKey, peerPublicKey, msg.recipientKeys, isOwn, msg.senderId, peerUserId]);
 
   const lines = decryptedText.split('\n');
   const firstLine = lines[0] || '';
   const restLines = lines.slice(1).join('\n');
 
   const isImgUrl = (url: string) => {
-    return (
-      url.match(/\.(jpeg|jpg|gif|png|webp|enc)($|\?)/i) != null ||
-      url.includes('/api/v1/files/') ||
-      url.includes('giphy.com/media')
-    );
+    const mime = detectMimeType(url);
+    return isImageMimeType(mime) ||
+      url.includes('giphy.com/media') ||
+      url.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/i) != null;
+  };
+
+  const isVideoUrl = (url: string) => {
+    const mime = detectMimeType(url);
+    return isVideoMimeType(mime) ||
+      url.match(/\.(mp4|webm|mov|avi)($|\?)/i) != null;
   };
 
   // Handle encrypted file payload fetch & local decryption
@@ -90,30 +165,96 @@ function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, forma
     let isMounted = true;
     if (!firstLine || !firstLine.includes('/api/v1/files/')) return;
 
+    let blobUrl: string | null = null;
+
     if (firstLine.endsWith('.enc') || firstLine.includes('/api/v1/files/')) {
       setLoadingMedia(true);
-      fetch(firstLine)
-        .then((res) => res.arrayBuffer())
+
+      // FIX (§12d): Download via the axios instance instead of raw fetch().
+      // The axios response interceptor handles JWT token refresh automatically,
+      // so file downloads after token expiry no longer fail with 401.
+      messageApi.downloadFile(firstLine)
         .then(async (buffer) => {
           if (!isMounted) return;
-          // ARCH FIX (§12b): Derive the real MIME type from the URL before it gained
-          // the .enc suffix, rather than hardcoding 'image/png'.  For example
-          // "photo.jpg.enc" → "image/jpeg".  Falls back to 'image/jpeg' for unknown
-          // extensions since the vast majority of encrypted uploads are photos.
-          const baseName = firstLine.replace(/\.enc$/i, '');
-          const ext = baseName.split('.').pop()?.toLowerCase() ?? '';
-          const mimeFromExt: Record<string, string> = {
-            jpg: 'image/jpeg', jpeg: 'image/jpeg',
-            png: 'image/png', gif: 'image/gif', webp: 'image/webp',
-          };
-          const detectedMime = mimeFromExt[ext] ?? 'image/jpeg';
-          const url = await decryptFileToUrl(buffer, conversationId, peerPublicKey, detectedMime);
-          if (isMounted) {
-            setMediaBlobUrl(url || firstLine);
+          const detectedMime = detectMimeType(firstLine);
+
+          const currentUserId = useAuthStore.getState().user?.id ?? '';
+          const myWrappedFileKey = msg.recipientKeys?.[currentUserId] ?? null;
+
+          // ARCH FIX (§9): If this is a group-encrypted message (recipientKeys present),
+          // use the wrapped per-file key to decrypt. Otherwise fall back to pairwise
+          // decryption (backward compatibility with messages sent before §9 fan-out).
+          //
+          // Backward-compat note: old-format messages (pre-§9) were encrypted with
+          // encryptFile() (pairwise ECDH) but may still carry recipientKeys from
+          // encryptMessageForGroup() (which wraps a DIFFERENT per-message key, not
+          // the file key). decryptFileForGroup() will fail on those — so we try
+          // the group path first, then gracefully fall back to pairwise decryption.
+          if (myWrappedFileKey && senderPublicKey) {
+            // Try group fan-out decryption first (new unified format)
+            let url = await decryptFileForGroup(
+              buffer, conversationId, senderPublicKey, myWrappedFileKey, detectedMime, currentUserId
+            );
+            if (!isMounted) return;
+
+            // Fall back to pairwise decryption if group decryption failed
+            // (legacy messages where file was encrypted with pairwise ECDH key)
+            if (!url) {
+              let fileDecryptKey = isOwn ? peerPublicKey : senderPublicKey;
+              if (!fileDecryptKey) {
+                try {
+                  const targetId = isOwn ? peerUserId : msg.senderId;
+                  if (targetId) {
+                    const res = await userApi.getPublicKey(targetId);
+                    fileDecryptKey = res?.publicKey || '';
+                  }
+                } catch { /* ignore */ }
+              }
+              url = await decryptFileToUrl(buffer, conversationId, fileDecryptKey, detectedMime, currentUserId);
+            }
+
+            if (!isMounted) return;
+            if (url) {
+              blobUrl = url;
+              setMediaBlobUrl(url);
+            } else {
+              setMediaBlobUrl(null);
+            }
+          } else {
+            // No recipientKeys → pairwise decryption (legacy / direct chat)
+            let fileDecryptKey = isOwn ? peerPublicKey : senderPublicKey;
+            if (!fileDecryptKey) {
+              try {
+                const targetId = isOwn ? peerUserId : msg.senderId;
+                if (targetId) {
+                  const res = await userApi.getPublicKey(targetId);
+                  fileDecryptKey = res?.publicKey || '';
+                }
+              } catch { /* ignore */ }
+            }
+            const url = await decryptFileToUrl(buffer, conversationId, fileDecryptKey, detectedMime, currentUserId);
+
+            if (!isMounted) return;
+            if (url) {
+              blobUrl = url;
+              setMediaBlobUrl(url);
+            } else {
+              setMediaBlobUrl(null);
+            }
           }
         })
-        .catch(() => {
-          if (isMounted) setMediaBlobUrl(firstLine);
+        .catch((err) => {
+          if (!isMounted) return;
+          // Token refresh failure → redirect to login (axios interceptor already logged out)
+          if (err?.response?.status === 401 || err?.message?.includes('AUTH_EXPIRED')) {
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+          } else {
+            setMediaBlobUrl(null);
+            setMediaError(true);
+          }
         })
         .finally(() => {
           if (isMounted) setLoadingMedia(false);
@@ -124,8 +265,9 @@ function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, forma
 
     return () => {
       isMounted = false;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [firstLine, conversationId, peerPublicKey]);
+  }, [firstLine, conversationId, senderPublicKey, peerPublicKey, isOwn, msg.senderId, peerUserId, msg.recipientKeys]);
 
   const renderBody = () => {
     if (msg.deleted) {
@@ -136,34 +278,258 @@ function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, forma
       return <Loader2 className="w-4 h-4 animate-spin text-dark-400" />;
     }
 
+    // Decryption failure / warning message
+    if (firstLine.startsWith('[') && firstLine.endsWith(']')) {
+      return (
+        <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-800/60 rounded-xl p-3 my-1 max-w-sm">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
+          <span>{firstLine.slice(1, -1)}</span>
+        </div>
+      );
+    }
+
     // IMAGE message type or direct image link
     if (
       msg.messageType === 'IMAGE' ||
       (msg.messageType === 'TEXT' && isImgUrl(firstLine) && !firstLine.includes('giphy.com'))
     ) {
-      const displaySrc = mediaBlobUrl || firstLine;
+      const isEncryptedFile = firstLine.includes('.enc') || firstLine.includes('/api/v1/files/');
+      const displaySrc = mediaBlobUrl || (isEncryptedFile ? null : firstLine);
+      const isMediaLoading = loadingMedia || (isEncryptedFile && !mediaBlobUrl && !mediaError);
       return (
         <div className="space-y-1.5 my-0.5">
           <div
-            onClick={() => displaySrc && setLightboxSrc(displaySrc)}
-            className="group relative max-w-sm rounded-xl overflow-hidden cursor-pointer bg-dark-800 border border-dark-600/50 hover:border-primary-500/50 transition-all shadow-md"
+            className={`group relative max-w-sm rounded-xl overflow-hidden bg-dark-800 border transition-all shadow-md ${
+              isMediaLoading || mediaError
+                ? 'border-dark-600/50 cursor-default'
+                : 'border-dark-600/50 hover:border-primary-500/50 cursor-pointer hover:shadow-lg'
+            }`}
           >
-            {loadingMedia ? (
+            {isMediaLoading ? (
               <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2">
                 <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
                 <span>Decrypting E2EE Media...</span>
               </div>
+            ) : mediaError || !displaySrc ? (
+              <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2 p-4 text-center">
+                <ImageIcon className="w-6 h-6 text-danger-500/70" />
+                <span className="font-medium text-dark-300">Unable to load media preview</span>
+                <span className="text-[10px] text-dark-500">File could not be decrypted or loaded</span>
+              </div>
             ) : (
-              <img
-                src={displaySrc}
-                alt="E2EE Attachment"
-                className="w-full max-h-72 object-cover rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
-                loading="lazy"
+              <>
+                <img
+                  src={displaySrc}
+                  alt="E2EE Attachment"
+                  className="w-full max-h-72 object-cover rounded-xl transition-transform duration-200"
+                  loading="lazy"
+                  onError={() => {
+                    setMediaError(true);
+                  }}
+                />
+                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
+                  Click to enlarge 🔍
+                </div>
+              </>
+            )}
+            {!isMediaLoading && !mediaError && displaySrc && (
+              <div
+                onClick={() => setLightboxSrc(displaySrc)}
+                className="absolute inset-0 cursor-pointer"
               />
             )}
-            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
-              Click to enlarge 🔍
+          </div>
+          {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
+        </div>
+      );
+    }
+
+    // VIDEO file or direct video link
+    if (
+      ((msg.messageType === 'FILE' || msg.messageType === 'TEXT') && isVideoUrl(firstLine) && !firstLine.includes('giphy.com'))
+    ) {
+      const isEncryptedFile = firstLine.includes('.enc') || firstLine.includes('/api/v1/files/');
+      const displaySrc = mediaBlobUrl || (isEncryptedFile ? null : firstLine);
+      const isMediaLoading = loadingMedia || (isEncryptedFile && !mediaBlobUrl && !mediaError);
+      return (
+        <div className="space-y-1.5 my-0.5">
+          <div
+            className={`group relative max-w-sm rounded-xl overflow-hidden bg-dark-800 border transition-all shadow-md ${
+              isMediaLoading || mediaError
+                ? 'border-dark-600/50 cursor-default'
+                : 'border-dark-600/50 hover:border-primary-500/50 cursor-pointer hover:shadow-lg'
+            }`}
+          >
+            {isMediaLoading ? (
+              <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                <span>Decrypting E2EE Media...</span>
+              </div>
+            ) : mediaError || !displaySrc ? (
+              <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2 p-4 text-center">
+                <Film className="w-6 h-6 text-danger-500/70" />
+                <span className="font-medium text-dark-300">Unable to load video preview</span>
+                <span className="text-[10px] text-dark-500">File could not be decrypted or loaded</span>
+              </div>
+            ) : (
+              <video
+                src={displaySrc}
+                controls
+                className="w-full max-h-72 object-cover rounded-xl transition-transform duration-200"
+                onLoadedMetadata={(e) => {
+                  const video = e.currentTarget;
+                  video.muted = true; // mute for autoplay safety
+                }}
+              />
+            )}
+            {!isMediaLoading && !mediaError && displaySrc && (
+              <div
+                onClick={() => setLightboxSrc(displaySrc)}
+                className="absolute inset-0 cursor-pointer"
+              />
+            )}
+          </div>
+          {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
+        </div>
+      );
+    }
+
+    // FILE message type (PDF, DOC, XLS, PPT, archives, etc.)
+    if (
+      msg.messageType === 'FILE' ||
+      (msg.messageType === 'TEXT' && firstLine.includes('/api/v1/files/') && !isImgUrl(firstLine) && !isVideoUrl(firstLine))
+    ) {
+      const isEncryptedFile = firstLine.includes('.enc') || firstLine.includes('/api/v1/files/');
+      const fileUrl = mediaBlobUrl || (isEncryptedFile ? null : firstLine);
+      const isMediaLoading = loadingMedia || (isEncryptedFile && !mediaBlobUrl && !mediaError);
+      const mimeType = detectMimeType(firstLine);
+      const isImage = isImageMimeType(mimeType);
+      const isVideo = isVideoMimeType(mimeType);
+
+      // If the decrypted blob is actually an image or video, render inline
+      if (isImage) {
+        return (
+          <div className="space-y-1.5 my-0.5">
+            <div
+              className={`group relative max-w-sm rounded-xl overflow-hidden bg-dark-800 border transition-all shadow-md ${
+                isMediaLoading || mediaError
+                  ? 'border-dark-600/50 cursor-default'
+                  : 'border-dark-600/50 hover:border-primary-500/50 cursor-pointer hover:shadow-lg'
+              }`}
+            >
+              {isMediaLoading ? (
+                <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                  <span>Decrypting E2EE Media...</span>
+                </div>
+              ) : mediaError || !fileUrl ? (
+                <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2 p-4 text-center">
+                  <ImageIcon className="w-6 h-6 text-danger-500/70" />
+                  <span className="font-medium text-dark-300">Unable to load media preview</span>
+                  <span className="text-[10px] text-dark-500">File could not be decrypted or loaded</span>
+                </div>
+              ) : (
+                <>
+                  <img
+                    src={fileUrl}
+                    alt="E2EE Attachment"
+                    className="w-full max-h-72 object-cover rounded-xl transition-transform duration-200"
+                    loading="lazy"
+                    onError={() => setMediaError(true)}
+                  />
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
+                    Click to enlarge 🔍
+                  </div>
+                </>
+              )}
+              {!isMediaLoading && !mediaError && fileUrl && (
+                <div
+                  onClick={() => setLightboxSrc(fileUrl)}
+                  className="absolute inset-0 cursor-pointer"
+                />
+              )}
             </div>
+            {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
+          </div>
+        );
+      }
+
+      if (isVideo) {
+        return (
+          <div className="space-y-1.5 my-0.5">
+            <div
+              className={`group relative max-w-sm rounded-xl overflow-hidden bg-dark-800 border transition-all shadow-md ${
+                isMediaLoading || mediaError
+                  ? 'border-dark-600/50 cursor-default'
+                  : 'border-dark-600/50 hover:border-primary-500/50 cursor-pointer hover:shadow-lg'
+              }`}
+            >
+              {isMediaLoading ? (
+                <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                  <span>Decrypting E2EE Media...</span>
+                </div>
+              ) : mediaError || !fileUrl ? (
+                <div className="w-64 h-44 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2 p-4 text-center">
+                  <Film className="w-6 h-6 text-danger-500/70" />
+                  <span className="font-medium text-dark-300">Unable to load video preview</span>
+                  <span className="text-[10px] text-dark-500">File could not be decrypted or loaded</span>
+                </div>
+              ) : (
+                <video
+                  src={fileUrl}
+                  controls
+                  className="w-full max-h-72 object-cover rounded-xl transition-transform duration-200"
+                />
+              )}
+            </div>
+            {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
+          </div>
+        );
+      }
+
+      // Generic file card for non-image/non-video files (PDF, DOC, XLS, PPT, archives, etc.)
+      const fileInfo = getFileInfoFromMime(mimeType, firstLine);
+      return (
+        <div className="space-y-1.5 my-0.5">
+          <div
+            className="group relative max-w-sm rounded-xl overflow-hidden bg-dark-800 border border-dark-600/50 transition-all shadow-md"
+          >
+            {isMediaLoading ? (
+              <div className="w-64 h-24 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-primary-400" />
+                <span>Decrypting E2EE File...</span>
+              </div>
+            ) : mediaError || !fileUrl ? (
+              <div className="w-64 h-24 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2 p-4 text-center">
+                <fileInfo.icon className="w-6 h-6 text-danger-500/70" />
+                <span className="font-medium text-dark-300">Unable to decrypt file</span>
+                <span className="text-[10px] text-dark-500">File could not be decrypted or loaded</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-4">
+                <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-dark-700 flex items-center justify-center">
+                  <fileInfo.icon className="w-6 h-6 text-primary-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">
+                    {fileInfo.name}
+                  </p>
+                  <p className="text-xs text-dark-400">
+                    {fileInfo.sizeLabel} · End-to-end encrypted
+                  </p>
+                </div>
+                <a
+                  href={fileUrl}
+                  download={fileInfo.name}
+                  onClick={(e) => e.stopPropagation()}
+                  title="Download file"
+                  className="p-2 rounded-xl text-dark-300 hover:text-white hover:bg-dark-700 transition-all shrink-0"
+                >
+                  <Download className="w-4 h-4" />
+                </a>
+              </div>
+            )}
           </div>
           {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
         </div>
@@ -182,18 +548,28 @@ function DecryptedMessageItem({ msg, conversationId, peerPublicKey, isOwn, forma
             onClick={() => gifSrc && setLightboxSrc(gifSrc)}
             className="group relative max-w-sm rounded-xl overflow-hidden cursor-pointer bg-dark-800 border border-dark-600/50 hover:border-accent-500/50 transition-all shadow-md"
           >
-            <img
-              src={gifSrc}
-              alt="GIF"
-              className="w-full max-h-72 object-contain rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
-              loading="lazy"
-            />
-            <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] text-white font-bold tracking-wider">
-              GIF
-            </div>
-            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
-              Click to enlarge 🔍
-            </div>
+            {gifError || !gifSrc ? (
+              <div className="w-64 h-36 flex flex-col items-center justify-center bg-dark-800 text-xs text-dark-400 gap-2 p-4 text-center">
+                <Film className="w-6 h-6 text-dark-500" />
+                <span className="font-medium text-dark-300">GIF unavailable</span>
+              </div>
+            ) : (
+              <>
+                <img
+                  src={gifSrc}
+                  alt="GIF"
+                  className="w-full max-h-72 object-contain rounded-xl group-hover:scale-[1.01] transition-transform duration-200"
+                  loading="lazy"
+                  onError={() => setGifError(true)}
+                />
+                <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-1.5 py-0.5 rounded text-[10px] text-white font-bold tracking-wider">
+                  GIF
+                </div>
+                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs text-white font-medium">
+                  Click to enlarge 🔍
+                </div>
+              </>
+            )}
           </div>
           {restLines && <p className="text-sm leading-relaxed px-0.5">{restLines}</p>}
         </div>
@@ -245,7 +621,7 @@ export function ChatView({ conversationId, conversations }: Props) {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
-  const [showImageModal, setShowImageModal] = useState(false);
+  const [showMediaModal, setShowMediaModal] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   // SECURITY FIX (§8): state for the Security Code modal (fingerprint display).
   const [showSecurityCode, setShowSecurityCode] = useState(false);
@@ -269,6 +645,33 @@ export function ChatView({ conversationId, conversations }: Props) {
 
   const peerMember = conversation?.members.find((m) => m.userId !== user?.id);
   const peerPublicKey = peerMember?.publicKey || '';
+
+  // Load own public key to ensure it is always available for self-wrapping and self-decryption
+  const [ownPublicKey, setOwnPublicKey] = useState<string>('');
+  useEffect(() => {
+    if (user?.id) {
+      exportPublicKey(user.id).then((k) => setOwnPublicKey(k)).catch(() => {});
+    }
+  }, [user?.id]);
+
+  // Dynamically fetch peer's public key if missing from conversation member record
+  useEffect(() => {
+    if (!peerMember || peerPublicKey) return;
+    let isMounted = true;
+    const fetchPeerKey = () => {
+      userApi.getPublicKey(peerMember.userId).then((res) => {
+        if (isMounted && res?.publicKey) {
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        }
+      }).catch(() => {});
+    };
+    fetchPeerKey();
+    const interval = setInterval(fetchPeerKey, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [peerMember?.userId, peerPublicKey, queryClient]);
 
   // SECURITY FIX (§8): TOFU key pinning check.
   // Whenever the peer's public key changes (or we see it for the first time),
@@ -297,7 +700,9 @@ export function ChatView({ conversationId, conversations }: Props) {
     queryFn: ({ pageParam }) => messageApi.list(conversationId, pageParam as number | undefined),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     initialPageParam: undefined as number | undefined,
-    refetchInterval: 4000,
+    // POLLING FIX: Reduced from 2500ms (2.5s) to 15000ms (15s) to reduce server load.
+    // In production, consider using WebSockets/SSE for real-time updates instead of polling.
+    refetchInterval: 15000,
   });
 
   const allMessages = useMemo(
@@ -328,6 +733,16 @@ export function ChatView({ conversationId, conversations }: Props) {
     }
   }, [conversationId, isLoading, allMessages.length, scrollToBottom]);
 
+  // Mark conversation as read whenever conversationId changes or new messages arrive while viewing
+  useEffect(() => {
+    if (!conversationId) return;
+    conversationApi.markAsRead(conversationId)
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      })
+      .catch(() => {});
+  }, [conversationId, allMessages.length, queryClient]);
+
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -339,14 +754,31 @@ export function ChatView({ conversationId, conversations }: Props) {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // ARCH FIX (§9): Build a recipients array from all conversation members except self.
-  // Used for both text and GIF sends via encryptMessageForGroup.
+  // ARCH FIX (§9): Build a recipients array from all conversation members INCLUDING self.
+  // Including the sender ensures a wrapped key is created for the sender so they can
+  // decrypt their own messages when loaded from the server / on page refresh.
   const encryptionRecipients = useMemo(() => {
     if (!conversation || !user) return [];
-    return conversation.members
-      .filter((m) => m.userId !== user.id && m.publicKey)
-      .map((m) => ({ userId: m.userId, publicKeyBase64: m.publicKey! }));
-  }, [conversation, user]);
+    const recipientsMap = new Map<string, string>();
+
+    // 1. Add all members that currently have a public key in the conversation
+    for (const m of conversation.members) {
+      if (m.publicKey) {
+        recipientsMap.set(m.userId, m.publicKey);
+      }
+    }
+
+    // 2. Ensure own public key is included for sender decryption
+    const myKey = conversation.members.find((m) => m.userId === user.id)?.publicKey || ownPublicKey;
+    if (myKey) {
+      recipientsMap.set(user.id, myKey);
+    }
+
+    return Array.from(recipientsMap.entries()).map(([userId, publicKeyBase64]) => ({
+      userId,
+      publicKeyBase64,
+    }));
+  }, [conversation, user, ownPublicKey]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -359,16 +791,35 @@ export function ChatView({ conversationId, conversations }: Props) {
       return;
     }
 
+    // Ensure peer public key is present in recipients for direct chats
+    let recipients = [...encryptionRecipients];
+    if (peerMember && !recipients.some((r) => r.userId === peerMember.userId)) {
+      try {
+        const peerKeyRes = await userApi.getPublicKey(peerMember.userId);
+        if (peerKeyRes?.publicKey) {
+          recipients.push({ userId: peerMember.userId, publicKeyBase64: peerKeyRes.publicKey });
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Direct chat safety: never send if recipient has no public key yet
+    if (conversation?.type === 'DIRECT' && peerMember && !recipients.some((r) => r.userId === peerMember.userId)) {
+      alert(`Waiting for ${conversationName} to log in and set up end-to-end encryption keys.`);
+      return;
+    }
+
     setInput('');
     setShowEmojiPicker(false);
     setShowGifPicker(false);
 
     // ARCH FIX (§9): Use fan-out group encryption for all conversations.
-    // For DIRECT chats this collapses to a single recipient — no special-casing.
+    // Includes all members (peer + self).
     const { encryptedContent, recipientKeys } = await encryptMessageForGroup(
       trimmed,
       conversationId,
-      encryptionRecipients
+      recipients,
+      user?.id
     );
 
     sendMutation.mutate({
@@ -379,17 +830,45 @@ export function ChatView({ conversationId, conversations }: Props) {
   };
 
   const handleSelectEmoji = (emoji: string) => {
-    setInput((prev) => prev + emoji);
-    inputRef.current?.focus();
+    if (inputRef.current) {
+      const start = inputRef.current.selectionStart ?? input.length;
+      const end = inputRef.current.selectionEnd ?? input.length;
+      const nextText = input.substring(0, start) + emoji + input.substring(end);
+      setInput(nextText);
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(start + emoji.length, start + emoji.length);
+      }, 0);
+    } else {
+      setInput((prev) => prev + emoji);
+    }
   };
 
   const handleSelectGif = async (gifUrl: string) => {
     setShowGifPicker(false);
+
+    let recipients = [...encryptionRecipients];
+    if (peerMember && !recipients.some((r) => r.userId === peerMember.userId)) {
+      try {
+        const peerKeyRes = await userApi.getPublicKey(peerMember.userId);
+        if (peerKeyRes?.publicKey) {
+          recipients.push({ userId: peerMember.userId, publicKeyBase64: peerKeyRes.publicKey });
+          queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (conversation?.type === 'DIRECT' && peerMember && !recipients.some((r) => r.userId === peerMember.userId)) {
+      alert(`Waiting for ${conversationName} to log in and set up end-to-end encryption keys.`);
+      return;
+    }
+
     // ARCH FIX (§9): Use fan-out group encryption for GIFs too.
     const { encryptedContent, recipientKeys } = await encryptMessageForGroup(
       gifUrl,
       conversationId,
-      encryptionRecipients
+      recipients,
+      user?.id
     );
     sendMutation.mutate({
       content: encryptedContent,
@@ -512,6 +991,12 @@ export function ChatView({ conversationId, conversations }: Props) {
                   ? peerPublicKey
                   : conversation?.members.find((m) => m.userId === msg.senderId)?.publicKey || peerPublicKey;
 
+                // Message sender's public key (needed to unwrap recipientKeys)
+                const senderMember = conversation?.members.find((m) => m.userId === msg.senderId);
+                const senderPublicKey = isOwn
+                  ? (senderMember?.publicKey || ownPublicKey)
+                  : (senderMember?.publicKey || peerPublicKey);
+
                 return (
                   <div
                     key={msg.id}
@@ -536,7 +1021,9 @@ export function ChatView({ conversationId, conversations }: Props) {
                       <DecryptedMessageItem
                         msg={msg}
                         conversationId={conversationId}
+                        senderPublicKey={senderPublicKey}
                         peerPublicKey={itemPeerKey}
+                        peerUserId={peerMember?.userId}
                         isOwn={isOwn}
                         formatTime={formatTime}
                         setLightboxSrc={setLightboxSrc}
@@ -578,17 +1065,19 @@ export function ChatView({ conversationId, conversations }: Props) {
         />
       )}
 
-      {/* Image Upload Modal */}
-      {showImageModal && (
-        <ImageUploadModal
+      {/* Media Upload Modal (Images, Videos, Documents, Other Files) */}
+      {showMediaModal && (
+        <MediaUploadModal
           conversationId={conversationId}
+          peerUserId={peerMember?.userId}
           peerPublicKey={peerPublicKey}
+          encryptionRecipients={encryptionRecipients}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
             queryClient.invalidateQueries({ queryKey: ['conversations'] });
             setTimeout(() => scrollToBottom(), 100);
           }}
-          onClose={() => setShowImageModal(false)}
+          onClose={() => setShowMediaModal(false)}
         />
       )}
 
@@ -615,14 +1104,14 @@ export function ChatView({ conversationId, conversations }: Props) {
         className="px-5 py-3 border-t border-dark-600 bg-dark-800/80 backdrop-blur-sm relative z-20"
       >
         <div className="flex items-center gap-2">
-          {/* Action Buttons */}
+          {/* Attach Button — Opens Media Upload Modal (Images, Videos, Documents, Other) */}
           <button
             type="button"
-            onClick={() => setShowImageModal(true)}
-            title="Attach Encrypted Image"
+            onClick={() => setShowMediaModal(true)}
+            title="Attach Encrypted File"
             className="p-2 rounded-xl text-dark-300 hover:text-primary-400 hover:bg-dark-700 transition-all shrink-0"
           >
-            <ImageIcon className="w-5 h-5" />
+            <LinkIcon className="w-5 h-5" />
           </button>
 
           <button
@@ -666,6 +1155,8 @@ export function ChatView({ conversationId, conversations }: Props) {
             placeholder={
               peerMember && hasKeyWarning(peerMember.userId)
                 ? 'Verify the security key change above before sending…'
+                : conversation?.type === 'DIRECT' && !peerPublicKey
+                ? `Waiting for ${conversationName} to set up encryption keys...`
                 : 'Send an encrypted message...'
             }
             className="flex-1 px-4 py-2.5 bg-dark-700 border border-dark-500 rounded-xl text-white placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"

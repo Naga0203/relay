@@ -50,8 +50,8 @@ public class SecurityHeadersFilter implements Filter {
                 "script-src 'self'; " +
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
                 "font-src 'self' https://fonts.gstatic.com; " +
-                "img-src 'self' data: blob: https://*.giphy.com; " +
-                "connect-src 'self' https://api.giphy.com; " +
+                "img-src 'self' data: blob: http://localhost:8080 https://*.giphy.com; " +
+                "connect-src 'self' http://localhost:8080 ws: wss: https://api.giphy.com; " +
                 "frame-ancestors 'none'; " +
                 "base-uri 'self'; " +
                 "form-action 'self'");

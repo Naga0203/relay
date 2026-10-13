@@ -20,4 +20,7 @@ export const conversationApi = {
 
   removeMember: (conversationId: string, userId: string) =>
     api.delete(`/conversations/${conversationId}/members/${userId}`),
+
+  markAsRead: (conversationId: string) =>
+    api.post(`/conversations/${conversationId}/read`).then((r) => r.data),
 };

@@ -2,7 +2,6 @@ package com.relay.conversation.dto;
 
 import com.relay.conversation.entity.Conversation;
 import com.relay.conversation.entity.ConversationMember;
-import com.relay.user.dto.UserResponse;
 
 import java.time.Instant;
 import java.util.List;
@@ -15,11 +14,14 @@ public record ConversationResponse(
         String avatarUrl,
         List<MemberResponse> members,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        long unreadCount
 ) {
     public record MemberResponse(
             UUID userId,
             String name,
+            String username,
+            String email,
             String avatarUrl,
             String publicKey,
             ConversationMember.MemberRole role,
@@ -27,10 +29,16 @@ public record ConversationResponse(
     ) {}
 
     public static ConversationResponse from(Conversation conv) {
+        return from(conv, 0L);
+    }
+
+    public static ConversationResponse from(Conversation conv, long unreadCount) {
         List<MemberResponse> memberResponses = conv.getMembers().stream()
                 .map(m -> new MemberResponse(
                         m.getUserId(),
                         m.getUser() != null ? m.getUser().getName() : null,
+                        m.getUser() != null ? m.getUser().getUsername() : null,
+                        m.getUser() != null ? m.getUser().getEmail() : null,
                         m.getUser() != null ? m.getUser().getAvatarUrl() : null,
                         m.getUser() != null ? m.getUser().getPublicKey() : null,
                         m.getRole(),
@@ -45,7 +53,8 @@ public record ConversationResponse(
                 conv.getAvatarUrl(),
                 memberResponses,
                 conv.getCreatedAt(),
-                conv.getUpdatedAt()
+                conv.getUpdatedAt(),
+                unreadCount
         );
     }
 }

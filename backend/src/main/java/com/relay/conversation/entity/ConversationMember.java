@@ -15,6 +15,8 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+
+
 public class ConversationMember {
 
     @Id
@@ -44,6 +46,10 @@ public class ConversationMember {
 
     @Column(name = "last_read_message_id")
     private UUID lastReadMessageId;
+
+    @Column(name = "last_read_sequence", nullable = false)
+    @Builder.Default
+    private Long lastReadSequence = 0L;
 
     @Column(nullable = false)
     @Builder.Default

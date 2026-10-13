@@ -1,9 +1,14 @@
 export interface User {
   id: string;
   name: string;
+  username?: string;
   email: string;
   avatarUrl: string | null;
   status: string;
+  age?: number;
+  gender?: string;
+  accountType?: 'MAJOR' | 'MINOR';
+  publicKey?: string;
   createdAt: string;
 }
 
@@ -20,6 +25,7 @@ export interface Conversation {
   name: string | null;
   avatarUrl: string | null;
   members: ConversationMember[];
+  unreadCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +33,8 @@ export interface Conversation {
 export interface ConversationMember {
   userId: string;
   name: string;
+  username?: string;
+  email?: string;
   avatarUrl: string | null;
   publicKey: string | null;
   role: 'ADMIN' | 'MEMBER';
@@ -40,7 +48,7 @@ export interface Message {
   senderName: string;
   senderAvatarUrl: string | null;
   content: string | null;
-  messageType: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE' | 'SYSTEM';
+  messageType: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE' | 'VIDEO' | 'SYSTEM';
   sequenceNumber: number;
   replyToId: string | null;
   createdAt: string;
@@ -59,14 +67,25 @@ export interface MessagePage {
 }
 
 export interface LoginRequest {
-  email: string;
+  email: string; // or username
   password: string;
 }
 
 export interface RegisterRequest {
   name: string;
+  username: string;
   email: string;
+  age: number;
+  gender: string;
   password: string;
+  confirmPassword: string;
+}
+
+export interface UpdateProfileRequest {
+  name?: string;
+  username?: string;
+  avatarUrl?: string;
+  status?: string;
 }
 
 export interface FileUploadResponse {
@@ -78,7 +97,7 @@ export interface FileUploadResponse {
 
 export interface SendMessageRequest {
   content?: string;
-  messageType?: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE';
+  messageType?: 'TEXT' | 'IMAGE' | 'GIF' | 'FILE' | 'VIDEO';
   replyToId?: string;
   idempotencyKey?: string;
   // ARCH FIX (§9): Per-recipient wrapped message keys for group E2EE.

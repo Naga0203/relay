@@ -40,6 +40,19 @@ public class User {
     @Column(name = "public_key", length = 2000)
     private String publicKey;
 
+    @Column(unique = true, length = 50)
+    private String username;
+
+    @Column
+    private Integer age;
+
+    @Column(length = 20)
+    private String gender;
+
+    @Column(name = "account_type", nullable = false, length = 10)
+    @Builder.Default
+    private String accountType = "MAJOR";
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

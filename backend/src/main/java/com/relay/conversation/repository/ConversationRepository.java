@@ -31,11 +31,9 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     Optional<Conversation> findByIdForUpdate(@Param("id") UUID id);
 
     @Modifying
-    @Query(value = "UPDATE conversations SET next_sequence = next_sequence + 1 WHERE id = :conversationId",
-           nativeQuery = true)
-    void incrementNextSequence(UUID conversationId);
+    @Query("UPDATE Conversation c SET c.nextSequence = c.nextSequence + 1 WHERE c.id = :conversationId")
+    void incrementNextSequence(@Param("conversationId") UUID conversationId);
 
-    @Query(value = "SELECT next_sequence - 1 FROM conversations WHERE id = :conversationId",
-           nativeQuery = true)
-    Long getCurrentSequenceAfterIncrement(UUID conversationId);
+    @Query("SELECT c.nextSequence - 1 FROM Conversation c WHERE c.id = :conversationId")
+    Long getCurrentSequenceAfterIncrement(@Param("conversationId") UUID conversationId);
 }

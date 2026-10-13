@@ -35,6 +35,13 @@ public class UserController {
         return ResponseEntity.ok(userService.updateProfile(principal, request));
     }
 
+    @PostMapping(value = "/me/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<UserResponse> uploadAvatar(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return ResponseEntity.ok(userService.updateAvatar(principal, file));
+    }
+
     @GetMapping("/search")
     public ResponseEntity<List<UserSearchResponse>> searchUsers(
             @RequestParam @Size(min = 1, max = 200, message = "Search query must be 1-200 characters") String q) {

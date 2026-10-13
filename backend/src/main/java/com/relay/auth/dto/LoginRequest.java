@@ -1,11 +1,11 @@
 package com.relay.auth.dto;
 
-import jakarta.validation.constraints.Email;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 
 public record LoginRequest(
-        @NotBlank(message = "Email is required")
-        @Email(message = "Invalid email format")
+        @NotBlank(message = "Email or username is required")
+        @JsonAlias({"emailOrUsername", "username"})
         String email,
 
         @NotBlank(message = "Password is required")

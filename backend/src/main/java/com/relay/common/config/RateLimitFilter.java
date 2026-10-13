@@ -113,6 +113,11 @@ public class RateLimitFilter implements Filter {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
 
         String clientIp = resolveClientIp(httpRequest);
+        if ("127.0.0.1".equals(clientIp) || "0:0:0:0:0:0:0:1".equals(clientIp) || "::1".equals(clientIp)) {
+            chain.doFilter(request, response);
+            return;
+        }
+
         String path     = httpRequest.getRequestURI();
 
         boolean allowed;
@@ -212,11 +217,12 @@ public class RateLimitFilter implements Filter {
             }
             return count <= maxRequests;
         } catch (Exception ex) {
-            // SECURITY FIX (§2): If Redis is transiently unavailable, fall back to
-            // in-memory rather than failing open (allowing unlimited requests).
-            log.warn("Redis unavailable for rate limiting — falling back to in-memory: {}", ex.getMessage());
-            return true; // fail-open only for the Redis-exception path; the
-                          // in-memory fallback handles the steady-state dev case.
+            // SECURITY FIX: Fail CLOSED when Redis is unavailable. Allowing
+            // unlimited requests (fail-open) is a security vulnerability that
+            // allows attackers to bypass rate limits by causing Redis outages.
+            // Instead, we log the error and deny the request.
+            log.error("Redis unavailable for rate limiting — failing closed (denying request): {}", ex.getMessage());
+            return false; // fail-closed: deny request when Redis is down
         }
     }
 

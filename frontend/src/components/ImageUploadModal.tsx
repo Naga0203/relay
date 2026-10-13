@@ -1,16 +1,30 @@
 import { useState, useRef } from 'react';
 import { X, Upload, Link as LinkIcon, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { messageApi } from '../features/chat/api';
-import { encryptFile, encryptText } from '../lib/e2eCrypto';
+import { encryptFile, encryptMessageForGroup } from '../lib/e2eCrypto';
+import { useAuthStore } from '../stores/authStore';
+
+interface EncryptionRecipient {
+  userId: string;
+  publicKeyBase64: string;
+}
 
 interface Props {
   conversationId: string;
   peerPublicKey?: string;
+  /** All conversation members' public keys for E2EE group fan-out. */
+  encryptionRecipients: EncryptionRecipient[];
   onSuccess: () => void;
   onClose: () => void;
 }
 
-export function ImageUploadModal({ conversationId, peerPublicKey = '', onSuccess, onClose }: Props) {
+export function ImageUploadModal({
+  conversationId,
+  peerPublicKey = '',
+  encryptionRecipients = [],
+  onSuccess,
+  onClose,
+}: Props) {
   const [tab, setTab] = useState<'upload' | 'url'>('upload');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
@@ -58,8 +72,18 @@ export function ImageUploadModal({ conversationId, peerPublicKey = '', onSuccess
           setLoading(false);
           return;
         }
+        let keyToUse = peerPublicKey;
+        if (!keyToUse) {
+          const rec = encryptionRecipients.find((r) => r.publicKeyBase64);
+          if (rec) keyToUse = rec.publicKeyBase64;
+        }
+        if (!keyToUse) {
+          setError('Recipient encryption key not available yet. Please wait a moment and try again.');
+          setLoading(false);
+          return;
+        }
         // Client-side E2EE file payload encryption with ECDH peer key
-        const encryptedFile = await encryptFile(selectedFile, conversationId, peerPublicKey);
+        const encryptedFile = await encryptFile(selectedFile, conversationId, keyToUse);
         const uploadRes = await messageApi.uploadFile(encryptedFile);
         finalImageUrl = uploadRes.fileUrl;
       } else {
@@ -76,13 +100,23 @@ export function ImageUploadModal({ conversationId, peerPublicKey = '', onSuccess
         ? `${finalImageUrl}\n${caption.trim()}`
         : finalImageUrl;
 
-      // Encrypt final message payload with AES-GCM 256-bit using peer ECDH key
-      const encryptedContent = await encryptText(content, conversationId, peerPublicKey);
+      // ARCH FIX (§13b): Use fan-out group encryption for image URL message content.
+      // Previously used legacy encryptText (pairwise only, no recipientKeys) which
+      // is inconsistent with ChatView's text/GIF sending path and lacks wrapped keys
+      // for group decryption.  Now sends recipientKeys so decryptGroupMessage works.
+      // encryptionRecipients includes all members (peer + self) passed from ChatView.
+      const { encryptedContent, recipientKeys } = await encryptMessageForGroup(
+        content,
+        conversationId,
+        encryptionRecipients,
+        useAuthStore.getState().user?.id
+      );
 
       await messageApi.send(conversationId, {
         content: encryptedContent,
         messageType: 'IMAGE',
         idempotencyKey: crypto.randomUUID(),
+        recipientKeys,
       });
 
       onSuccess();

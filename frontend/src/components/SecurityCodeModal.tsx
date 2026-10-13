@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
-import { ShieldCheck, X, Copy, Check } from 'lucide-react';
-import { getKeyFingerprint, exportPublicKey } from '../lib/e2eCrypto';
+import { ShieldCheck, X, Copy, Check, RefreshCw } from 'lucide-react';
+import { getKeyFingerprint, exportPublicKey, generateAndStoreNewIdentityKeyPair } from '../lib/e2eCrypto';
+import { userApi } from '../features/profile/api';
+import { useAuthStore } from '../stores/authStore';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
   /** The peer's display name */
@@ -15,7 +18,7 @@ interface Props {
  *
  * Displays the SHA-256 fingerprint of both the current user's key and the peer's key
  * as 12 groups of 5 digits — the standard "safety number" pattern used by Signal and
- * WhatsApp.  Users can compare these out-of-band (voice call, in person) to verify
+ * WhatsApp. Users can compare these out-of-band (voice call, in person) to verify
  * that the server has not swapped a key.
  *
  * Accessible via the "End-to-End Encrypted" badge in the ChatView header.
@@ -24,12 +27,17 @@ export function SecurityCodeModal({ peerName, peerPublicKeyBase64, onClose }: Pr
   const [myFingerprint, setMyFingerprint]     = useState<string>('');
   const [peerFingerprint, setPeerFingerprint] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncSuccess, setResyncSuccess] = useState(false);
+
+  const user = useAuthStore((s) => s.user);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let mounted = true;
     async function load() {
       const [myKey, peerFp] = await Promise.all([
-        exportPublicKey(),
+        exportPublicKey(user?.id),
         getKeyFingerprint(peerPublicKeyBase64),
       ]);
       const myFp = await getKeyFingerprint(myKey);
@@ -40,7 +48,26 @@ export function SecurityCodeModal({ peerName, peerPublicKeyBase64, onClose }: Pr
     }
     load();
     return () => { mounted = false; };
-  }, [peerPublicKeyBase64]);
+  }, [peerPublicKeyBase64, user?.id]);
+
+  const handleResyncKey = async () => {
+    if (!user?.id || resyncing) return;
+    setResyncing(true);
+    setResyncSuccess(false);
+    try {
+      const newPubB64 = await generateAndStoreNewIdentityKeyPair(user.id);
+      await userApi.uploadPublicKey(newPubB64);
+      const newFp = await getKeyFingerprint(newPubB64);
+      setMyFingerprint(newFp);
+      setResyncSuccess(true);
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      setTimeout(() => setResyncSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to re-sync key:', err);
+    } finally {
+      setResyncing(false);
+    }
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -123,6 +150,24 @@ export function SecurityCodeModal({ peerName, peerPublicKeyBase64, onClose }: Pr
             <><Copy className="w-4 h-4" /> Copy both codes</>
           )}
         </button>
+
+        {/* Re-sync security key button */}
+        <div className="pt-2 border-t border-dark-700">
+          <button
+            onClick={handleResyncKey}
+            disabled={resyncing}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-primary-500/30 bg-primary-500/10 hover:bg-primary-500/20 text-xs font-medium text-primary-300 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
+            {resyncing ? 'Re-syncing Security Keys…' : 'Re-sync My Security Key'}
+          </button>
+          {resyncSuccess && (
+            <p className="text-[11px] text-emerald-400 text-center mt-1.5 flex items-center justify-center gap-1">
+              <Check className="w-3.5 h-3.5" />
+              New keypair generated and synced with server!
+            </p>
+          )}
+        </div>
 
         <p className="text-[11px] text-dark-500 text-center leading-relaxed">
           Security codes use SHA-256 fingerprints of ECDH P-256 public keys.

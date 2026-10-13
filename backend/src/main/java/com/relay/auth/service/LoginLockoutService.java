@@ -144,8 +144,8 @@ public class LoginLockoutService {
             String val = redis.opsForValue().get(LOCKOUT_KEY_PREFIX + normalizedEmail);
             return "locked".equals(val);
         } catch (Exception ex) {
-            log.warn("Redis unavailable during lockout check — allowing through: {}", ex.getMessage());
-            return false; // fail-open: don't block legitimate logins when Redis is down
+            log.warn("Redis unavailable during lockout check — falling back to in-memory: {}", ex.getMessage());
+            return isLockedOutFallback(normalizedEmail);
         }
     }
 
@@ -200,7 +200,8 @@ public class LoginLockoutService {
             }
 
         } catch (Exception ex) {
-            log.warn("Redis unavailable during failure recording — state may be lost: {}", ex.getMessage());
+            log.warn("Redis unavailable during failure recording — falling back to in-memory: {}", ex.getMessage());
+            recordFailureFallback(normalizedEmail);
         }
     }
 

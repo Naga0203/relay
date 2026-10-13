@@ -71,19 +71,40 @@ function dbPut(db: IDBDatabase, store: string, value: unknown): Promise<void> {
 // ─── Identity Key Pair Management ─────────────────────────────────────
 
 interface StoredIdentityKey {
-  id: string; // always 'identity'
+  id: string; // 'identity-${userId}' or legacy 'identity'
   publicKeyJwk: JsonWebKey;
   privateKeyJwk: JsonWebKey;
 }
 
 /**
+ * Helper to get the current authenticated user's ID from localStorage if available.
+ */
+function getCurrentUserId(): string | null {
+  try {
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+      const parsed = JSON.parse(userStr);
+      if (parsed && typeof parsed.id === 'string') {
+        return parsed.id;
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
  * Generates or retrieves the user's ECDH identity key pair.
+ * Scoped by userId so multiple accounts in the same browser (or profile switches)
+ * do not overwrite or collide with each other's keys.
  * The private key NEVER leaves the client.
  */
-export async function getOrCreateIdentityKeyPair(): Promise<CryptoKeyPair> {
+export async function getOrCreateIdentityKeyPair(userId?: string): Promise<CryptoKeyPair> {
   const db = await openKeyDB();
+  const effectiveUserId = userId || getCurrentUserId();
+  const keyId = effectiveUserId ? `identity-${effectiveUserId}` : 'identity';
 
-  const stored = await dbGet<StoredIdentityKey>(db, KEY_STORE_NAME, 'identity');
+  const stored = await dbGet<StoredIdentityKey>(db, KEY_STORE_NAME, keyId);
+
   if (stored) {
     const publicKey = await crypto.subtle.importKey(
       'jwk', stored.publicKeyJwk,
@@ -99,7 +120,7 @@ export async function getOrCreateIdentityKeyPair(): Promise<CryptoKeyPair> {
     return { publicKey, privateKey };
   }
 
-  // Generate new identity key pair
+  // Generate new identity key pair specifically scoped for this user
   const keyPair = await crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' },
     true, // extractable for storage
@@ -110,7 +131,7 @@ export async function getOrCreateIdentityKeyPair(): Promise<CryptoKeyPair> {
   const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
 
   await dbPut(db, KEY_STORE_NAME, {
-    id: 'identity',
+    id: keyId,
     publicKeyJwk,
     privateKeyJwk,
   } as StoredIdentityKey);
@@ -120,10 +141,41 @@ export async function getOrCreateIdentityKeyPair(): Promise<CryptoKeyPair> {
 }
 
 /**
+ * Explicitly generates and stores a new identity keypair for the given user,
+ * replacing any existing keypair in IndexedDB, and invalidates session key caches.
+ * Returns the base64-encoded public key JWK string ready for server upload.
+ */
+export async function generateAndStoreNewIdentityKeyPair(userId?: string): Promise<string> {
+  const db = await openKeyDB();
+  const effectiveUserId = userId || getCurrentUserId();
+  const keyId = effectiveUserId ? `identity-${effectiveUserId}` : 'identity';
+
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveBits']
+  );
+
+  const publicKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+
+  await dbPut(db, KEY_STORE_NAME, {
+    id: keyId,
+    publicKeyJwk,
+    privateKeyJwk,
+  } as StoredIdentityKey);
+
+  sessionKeyCache.clear();
+  db.close();
+
+  return btoa(JSON.stringify(publicKeyJwk));
+}
+
+/**
  * Exports the user's public key as a base64-encoded JWK string for server upload.
  */
-export async function exportPublicKey(): Promise<string> {
-  const keyPair = await getOrCreateIdentityKeyPair();
+export async function exportPublicKey(userId?: string): Promise<string> {
+  const keyPair = await getOrCreateIdentityKeyPair(userId);
   const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
   return btoa(JSON.stringify(jwk));
 }
@@ -194,15 +246,17 @@ const sessionKeyCache: Map<string, CryptoKey> = new Map();
  */
 export async function getSessionKey(
   conversationId: string,
-  peerPublicKeyBase64: string
+  peerPublicKeyBase64: string,
+  userId?: string
 ): Promise<CryptoKey> {
-  const cacheKey = `${conversationId}:${peerPublicKeyBase64.substring(0, 32)}`;
+  const currentUserId = userId || getCurrentUserId() || 'anon';
+  const cacheKey = `${currentUserId}:${conversationId}:${peerPublicKeyBase64.substring(0, 32)}`;
 
   if (sessionKeyCache.has(cacheKey)) {
     return sessionKeyCache.get(cacheKey)!;
   }
 
-  const identityKeyPair = await getOrCreateIdentityKeyPair();
+  const identityKeyPair = await getOrCreateIdentityKeyPair(currentUserId);
   const peerPublicKey = await importPeerPublicKey(peerPublicKeyBase64);
   const sessionKey = await deriveSessionKey(
     identityKeyPair.privateKey,
@@ -250,12 +304,13 @@ function base64ToBuffer(base64: string): Uint8Array {
 export async function encryptText(
   plaintext: string,
   conversationId: string,
-  peerPublicKeyBase64: string
+  peerPublicKeyBase64: string,
+  userId?: string
 ): Promise<string> {
   if (!plaintext) return plaintext;
 
   // FAIL CLOSED: No try/catch fallback to plaintext
-  const key = await getSessionKey(conversationId, peerPublicKeyBase64);
+  const key = await getSessionKey(conversationId, peerPublicKeyBase64, userId);
   const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV
   const encoded = new TextEncoder().encode(plaintext);
 
@@ -278,7 +333,8 @@ export async function encryptText(
 export async function decryptText(
   encryptedText: string | null | undefined,
   conversationId: string,
-  peerPublicKeyBase64: string
+  peerPublicKeyBase64: string,
+  userId?: string
 ): Promise<string> {
   if (!encryptedText) return '';
 
@@ -292,7 +348,7 @@ export async function decryptText(
     return encryptedText;
   }
 
-  const key = await getSessionKey(conversationId, peerPublicKeyBase64);
+  const key = await getSessionKey(conversationId, peerPublicKeyBase64, userId);
   const parts = encryptedText.substring(E2E_PREFIX.length).split(':');
   if (parts.length !== 2) {
     return '[Malformed encrypted message]';
@@ -343,28 +399,143 @@ export async function encryptFile(
   return new File([encryptedBlob], encFileName, { type: 'application/octet-stream' });
 }
 
+// ─── Unified Group File Encryption (§9 fan-out for files) ───────────────────
+//
+// ARCH FIX (§9): The original encryptFile() encrypted the file binary with a
+// single pairwise ECDH key (sender + one peer).  In a group chat with 3+
+// members, only the sender and that one peer could decrypt the file — every
+// other member saw "Unable to decrypt file".
+//
+// Solution: Split the file- encryption and key-wrapping into two steps so the
+// file URL (only known after upload) can be included in the encrypted message
+// content.  Both the file binary and the message content are encrypted with the
+// SAME per-file AES key, so a single set of recipientKeys unwraps both.
+//
+//   1. encryptFileWithKey()    — generate per-file AES key, encrypt file binary,
+//                                 return encrypted File + raw CryptoKey (not exported).
+//   2. Upload the encrypted file → server returns file URL.
+//   3. encryptContentAndWrapFileKey() — encrypt message content (file URL +
+//                                 caption) with the per-file key, then wrap (encrypt)
+//                                 the key for each recipient via pairwise ECDH.
+//
+// On the receiving side:
+//   - decryptGroupMessage() unwraps the key to decrypt the message content (file URL).
+//   - decryptFileForGroup()  unwraps the SAME key to decrypt the file binary.
+//   Both use recipientKeys[currentUserId] as the wrapped key input.
+
+/**
+ * Step 1 of unified group file encryption: generates a fresh per-file AES-GCM-256
+ * key, encrypts the file binary, and returns both the encrypted File and the
+ * raw (non-extractable-for-export) CryptoKey for later use.
+ */
+export async function encryptFileWithKey(file: File): Promise<{ encryptedFile: File; fileKey: CryptoKey }> {
+  const fileKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true, // extractable so we can export for wrapping
+    ['encrypt', 'decrypt']
+  );
+
+  const fileIv = crypto.getRandomValues(new Uint8Array(12));
+  const arrayBuffer = await file.arrayBuffer();
+
+  const fileCiphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: fileIv as BufferSource },
+    fileKey,
+    arrayBuffer as BufferSource
+  );
+
+  // Prepend 12-byte IV to ciphertext (same layout as encryptFile)
+  const combined = new Uint8Array(fileIv.byteLength + fileCiphertext.byteLength);
+  combined.set(fileIv, 0);
+  combined.set(new Uint8Array(fileCiphertext), fileIv.byteLength);
+
+  const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+  const encFileName = file.name.endsWith('.enc') ? file.name : `${file.name}.enc`;
+  const encryptedFile = new File([encryptedBlob], encFileName, { type: 'application/octet-stream' });
+
+  return { encryptedFile, fileKey };
+}
+
+/**
+ * Step 3 of unified group file encryption: encrypts the message content (file URL
+ * + caption) with the per-file key, then wraps (encrypts) the key for each
+ * recipient using their pairwise ECDH session key with the sender.
+ *
+ * Returns encryptedContent (e2e:v2:… format) and recipientKeys (userId →
+ * base64 "iv:ciphertext" wrapped key).
+ */
+export async function encryptContentAndWrapFileKey(
+  messageContent: string,
+  fileKey: CryptoKey,
+  conversationId: string,
+  recipients: Array<{ userId: string; publicKeyBase64: string }>,
+  userId?: string
+): Promise<{ encryptedContent: string; recipientKeys: Record<string, string> }> {
+  // Export raw file key bytes for wrapping
+  const rawFileKey = await crypto.subtle.exportKey('raw', fileKey);
+
+  // Encrypt message content (file URL + caption) with the per-file key
+  const textIv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(messageContent);
+  const textCiphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: textIv as BufferSource },
+    fileKey,
+    encoded as BufferSource
+  );
+  const textIvB64 = bufferToBase64(textIv.buffer as ArrayBuffer);
+  const textCipherB64 = bufferToBase64(textCiphertext);
+  const encryptedContent = `${E2E_PREFIX}${textIvB64}:${textCipherB64}`;
+
+  // Wrap file key for each recipient using pairwise ECDH session key
+  const identityKeyPair = await getOrCreateIdentityKeyPair(userId);
+  const recipientKeys: Record<string, string> = {};
+
+  for (const recipient of recipients) {
+    const peerPublicKey = await importPeerPublicKey(recipient.publicKeyBase64);
+    const sessionKey = await deriveSessionKey(
+      identityKeyPair.privateKey,
+      peerPublicKey,
+      conversationId
+    );
+
+    const wrapIv = crypto.getRandomValues(new Uint8Array(12));
+    const wrappedKeyBytes = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: wrapIv as BufferSource },
+      sessionKey,
+      rawFileKey as BufferSource
+    );
+
+    const wrapIvB64 = bufferToBase64(wrapIv.buffer as ArrayBuffer);
+    const wrappedB64 = bufferToBase64(wrappedKeyBytes);
+    recipientKeys[recipient.userId] = `${wrapIvB64}:${wrappedB64}`;
+  }
+
+  return { encryptedContent, recipientKeys };
+}
+
 /**
  * Decrypts an encrypted file and creates a Blob URL.
- *
- * ARCH FIX (§12b): The mimeType default changed from 'image/png' to
- * 'application/octet-stream' so that callers who don't pass an explicit type
- * don't silently produce a blob with a wrong MIME type.  All call sites in
- * ChatView now pass the actual content type derived from the file extension /
- * message metadata.
  */
 export async function decryptFileToUrl(
   encryptedArrayBuffer: ArrayBuffer,
   conversationId: string,
   peerPublicKeyBase64: string,
-  mimeType = 'application/octet-stream'
+  mimeType = 'application/octet-stream',
+  userId?: string
 ): Promise<string> {
-  const key = await getSessionKey(conversationId, peerPublicKeyBase64);
-  const fullArray = new Uint8Array(encryptedArrayBuffer);
-
-  const iv = fullArray.slice(0, 12);
-  const ciphertext = fullArray.slice(12);
-
   try {
+    // Guard against empty/null public keys — return early instead of
+    // letting importPeerPublicKey throw on atob('') + JSON.parse('').
+    if (!peerPublicKeyBase64) {
+      return '';
+    }
+
+    const key = await getSessionKey(conversationId, peerPublicKeyBase64, userId);
+    const fullArray = new Uint8Array(encryptedArrayBuffer);
+
+    const iv = fullArray.slice(0, 12);
+    const ciphertext = fullArray.slice(12);
+
     const decryptedBuffer = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: iv as BufferSource },
       key,
@@ -384,6 +555,84 @@ export async function decryptFileToUrl(
 export function isEncrypted(text: string | null | undefined): boolean {
   if (!text) return false;
   return text.startsWith(E2E_PREFIX) || text.startsWith('e2e:v1:');
+}
+
+/**
+ * Maps a file extension to its MIME type.
+ * Used to recover the original content type for files stored with a .enc suffix.
+ */
+const EXT_TO_MIME: Record<string, string> = {
+  // Images
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  // Videos
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo',
+  // Documents
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain', csv: 'text/csv',
+  // Archives
+  zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+  tar: 'application/x-tar', gz: 'application/gzip',
+  // Android / Executables
+  apk: 'application/vnd.android.package-archive',
+  exe: 'application/x-msdownload',
+  msi: 'application/x-msi',
+  dmg: 'application/x-apple-diskimage',
+  // Other
+  json: 'application/json', xml: 'application/xml',
+  html: 'text/html', css: 'text/css', js: 'text/javascript',
+};
+
+/**
+ * Detects the original MIME type from a filename.
+ * Handles ".enc" suffix files by stripping it and looking up the base extension.
+ * e.g. "photo.png.enc" -> "image/png", "document.pdf.enc" -> "application/pdf"
+ */
+export function detectMimeType(filename: string): string {
+  // Strip query parameters or fragments
+  const cleanName = filename.split(/[?#]/)[0];
+
+  // Strip .enc suffix if present (E2EE encrypted files)
+  const withoutEnc = cleanName.replace(/\.enc$/i, '');
+
+  // Extract extension
+  const parts = withoutEnc.split('.');
+  if (parts.length < 2) return 'application/octet-stream';
+
+  const ext = parts.pop()!.toLowerCase();
+  return EXT_TO_MIME[ext] || 'application/octet-stream';
+}
+
+/**
+ * Detects the original file extension from a filename, stripping .enc suffix.
+ * e.g. "photo.png.enc" -> ".png", "document.pdf" -> ".pdf"
+ */
+export function detectFileExtension(filename: string): string {
+  const cleanName = filename.split(/[?#]/)[0];
+  const withoutEnc = cleanName.replace(/\.enc$/i, '');
+  const parts = withoutEnc.split('.');
+  if (parts.length < 2) return '';
+  return '.' + parts.pop()!.toLowerCase();
+}
+
+/**
+ * Returns true if the MIME type is an image type.
+ */
+export function isImageMimeType(mimeType: string): boolean {
+  return mimeType.startsWith('image/');
+}
+
+/**
+ * Returns true if the MIME type is a video type.
+ */
+export function isVideoMimeType(mimeType: string): boolean {
+  return mimeType.startsWith('video/');
 }
 
 /**
@@ -554,7 +803,8 @@ export interface GroupEncryptedMessage {
 export async function encryptMessageForGroup(
   plaintext: string,
   conversationId: string,
-  recipients: Array<{ userId: string; publicKeyBase64: string }>
+  recipients: Array<{ userId: string; publicKeyBase64: string }>,
+  userId?: string
 ): Promise<GroupEncryptedMessage> {
   if (!plaintext) {
     return { encryptedContent: plaintext, recipientKeys: {} };
@@ -583,7 +833,7 @@ export async function encryptMessageForGroup(
   const rawMessageKey = await crypto.subtle.exportKey('raw', messageKey);
 
   // Step 4: For each recipient, wrap the message key with their pairwise session key.
-  const identityKeyPair = await getOrCreateIdentityKeyPair();
+  const identityKeyPair = await getOrCreateIdentityKeyPair(userId);
   const recipientKeys: Record<string, string> = {};
 
   for (const recipient of recipients) {
@@ -618,13 +868,15 @@ export async function encryptMessageForGroup(
  * @param conversationId     conversation ID
  * @param senderPublicKeyB64 the sender's public key (to derive the pairwise session key)
  * @param myWrappedKey       the current user's wrapped key from recipientKeys[myUserId]
+ * @param userId             current user's ID
  * @returns decrypted plaintext, or an error indicator string
  */
 export async function decryptGroupMessage(
   encryptedText: string | null | undefined,
   conversationId: string,
   senderPublicKeyB64: string,
-  myWrappedKey: string | undefined | null
+  myWrappedKey: string | undefined | null,
+  userId?: string
 ): Promise<string> {
   if (!encryptedText) return '';
 
@@ -641,12 +893,16 @@ export async function decryptGroupMessage(
   // If there's no wrapped key for this user, fall back to direct pairwise decryption
   // (backward compatibility with messages sent before §9 fan-out was deployed).
   if (!myWrappedKey) {
-    return decryptText(encryptedText, conversationId, senderPublicKeyB64);
+    return decryptText(encryptedText, conversationId, senderPublicKeyB64, userId);
+  }
+
+  if (!senderPublicKeyB64) {
+    return '[Decryption failed — missing sender public key]';
   }
 
   try {
     // Step 1: Derive the pairwise session key with the sender.
-    const identityKeyPair = await getOrCreateIdentityKeyPair();
+    const identityKeyPair = await getOrCreateIdentityKeyPair(userId);
     const senderPublicKey = await importPeerPublicKey(senderPublicKeyB64);
     const sessionKey = await deriveSessionKey(
       identityKeyPair.privateKey,
@@ -697,3 +953,167 @@ export async function decryptGroupMessage(
   }
 }
 
+// ─── Group E2EE File Encryption (§9 fan-out for files) ────────────────
+//
+// Mirrors encryptMessageForGroup but operates on binary file data.
+// A random per-file AES key encrypts the file, and that key is wrapped
+// for each recipient using their pairwise session key.
+
+/** Result of group file encryption: encrypted File + encrypted message content + per-recipient wrapped keys. */
+export interface GroupEncryptedFile {
+  /** The encrypted File blob. */
+  encryptedFile: File;
+  /** The message text (file URL + caption) encrypted with the same per-file key. Format: e2e:v2:<iv>:<ciphertext> */
+  encryptedContent: string;
+  /** Map of userId → base64-encoded wrapped per-file AES key (iv:ciphertext). */
+  recipientKeys: Record<string, string>;
+}
+
+/**
+ * Encrypts a file AND its message content for a group conversation using fan-out key wrapping.
+ * Both the file binary and the message text are encrypted with the same random AES key,
+ * so only one set of recipientKeys is needed for decryption of both.
+ * SECURITY: Throws on failure — NEVER falls back to unencrypted upload.
+ */
+export async function encryptFileForGroup(
+  file: File,
+  messageContent: string,
+  conversationId: string,
+  recipients: Array<{ userId: string; publicKeyBase64: string }>,
+  userId?: string
+): Promise<GroupEncryptedFile> {
+  // Step 1: Generate a random per-file AES-GCM-256 key (used for both file and text).
+  const fileKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true, // extractable so we can export and wrap it
+    ['encrypt', 'decrypt']
+  );
+
+  // Step 2: Encrypt the file binary with the file key.
+  const fileIv = crypto.getRandomValues(new Uint8Array(12));
+  const arrayBuffer = await file.arrayBuffer();
+  const fileCiphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: fileIv as BufferSource },
+    fileKey,
+    arrayBuffer as BufferSource
+  );
+
+  // Prepend 12-byte IV to ciphertext (same layout as encryptFile).
+  const combined = new Uint8Array(fileIv.byteLength + fileCiphertext.byteLength);
+  combined.set(fileIv, 0);
+  combined.set(new Uint8Array(fileCiphertext), fileIv.byteLength);
+
+  const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+  const encFileName = file.name.endsWith('.enc') ? file.name : `${file.name}.enc`;
+  const encryptedFile = new File([encryptedBlob], encFileName, { type: 'application/octet-stream' });
+
+  // Step 3: Encrypt the message text with the same file key.
+  const textIv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(messageContent);
+  const textCiphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: textIv as BufferSource },
+    fileKey,
+    encoded as BufferSource
+  );
+  const textIvB64 = bufferToBase64(textIv.buffer as ArrayBuffer);
+  const textCipherB64 = bufferToBase64(textCiphertext);
+  const encryptedContent = `${E2E_PREFIX}${textIvB64}:${textCipherB64}`;
+
+  // Step 4: Export the raw file key bytes.
+  const rawFileKey = await crypto.subtle.exportKey('raw', fileKey);
+
+  // Step 5: For each recipient, wrap the file key with their pairwise session key.
+  const identityKeyPair = await getOrCreateIdentityKeyPair(userId);
+  const recipientKeys: Record<string, string> = {};
+
+  for (const recipient of recipients) {
+    const peerPublicKey = await importPeerPublicKey(recipient.publicKeyBase64);
+    const sessionKey = await deriveSessionKey(
+      identityKeyPair.privateKey,
+      peerPublicKey,
+      conversationId
+    );
+
+    const wrapIv = crypto.getRandomValues(new Uint8Array(12));
+    const wrappedKeyBytes = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: wrapIv as BufferSource },
+      sessionKey,
+      rawFileKey as BufferSource
+    );
+
+    const wrapIvB64 = bufferToBase64(wrapIv.buffer as ArrayBuffer);
+    const wrappedB64 = bufferToBase64(wrappedKeyBytes);
+    recipientKeys[recipient.userId] = `${wrapIvB64}:${wrappedB64}`;
+  }
+
+  return { encryptedFile, encryptedContent, recipientKeys };
+}
+
+/**
+ * Decrypts a group-encrypted file using the wrapped per-file key.
+ *
+ * @param encryptedArrayBuffer  the encrypted file bytes (IV prepended to AES-GCM ciphertext)
+ * @param conversationId        conversation ID (for HKDF domain separation)
+ * @param senderPublicKeyB64    the sender's public key (to derive pairwise session key)
+ * @param myWrappedFileKey      the current user's wrapped file key from recipientKeys
+ * @param mimeType              the MIME type for the resulting blob URL
+ * @param userId                current user's ID
+ * @returns a blob URL of the decrypted file, or empty string on failure
+ */
+export async function decryptFileForGroup(
+  encryptedArrayBuffer: ArrayBuffer,
+  conversationId: string,
+  senderPublicKeyB64: string,
+  myWrappedFileKey: string,
+  mimeType = 'application/octet-stream',
+  userId?: string
+): Promise<string> {
+  try {
+    // Step 1: Derive the pairwise session key with the sender.
+    const identityKeyPair = await getOrCreateIdentityKeyPair(userId);
+    const senderPublicKey = await importPeerPublicKey(senderPublicKeyB64);
+    const sessionKey = await deriveSessionKey(
+      identityKeyPair.privateKey,
+      senderPublicKey,
+      conversationId
+    );
+
+    // Step 2: Unwrap the per-file key.
+    const wrapParts = myWrappedFileKey.split(':');
+    if (wrapParts.length !== 2) return '';
+
+    const wrapIv = base64ToBuffer(wrapParts[0]);
+    const wrappedKeyBytes = base64ToBuffer(wrapParts[1]);
+
+    const rawFileKeyBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: wrapIv as BufferSource },
+      sessionKey,
+      wrappedKeyBytes as BufferSource
+    );
+
+    // Step 3: Import the unwrapped file key.
+    const fileKey = await crypto.subtle.importKey(
+      'raw',
+      rawFileKeyBuffer,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+
+    // Step 4: Decrypt the file (IV is prepended to ciphertext).
+    const fullArray = new Uint8Array(encryptedArrayBuffer);
+    const fileIv = fullArray.slice(0, 12);
+    const fileCiphertext = fullArray.slice(12);
+
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: fileIv as BufferSource },
+      fileKey,
+      fileCiphertext as BufferSource
+    );
+
+    const blob = new Blob([decryptedBuffer], { type: mimeType });
+    return URL.createObjectURL(blob);
+  } catch {
+    return ''; // UI should show error state
+  }
+}

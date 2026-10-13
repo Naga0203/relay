@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { User } from '../types';
 import { exportPublicKey, clearSessionKeys } from '../lib/e2eCrypto';
 import { userApi } from '../features/profile/api';
+import { useChatStore } from './chatStore';
 
 interface AuthState {
   user: User | null;
@@ -34,7 +35,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     // E2EE: Generate key pair and upload public key to server
     // This is async but we don't block the login flow on it
-    exportPublicKey()
+    exportPublicKey(user.id)
       .then((pubKey) => userApi.uploadPublicKey(pubKey))
       .catch(() => {
         // Key upload failure is non-fatal but should be retried
@@ -58,6 +59,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem('user');
     // Clear E2EE session key cache on logout
     clearSessionKeys();
+    // Reset active chat
+    useChatStore.getState().setActiveConversation(null);
     set({ user: null, isAuthenticated: false });
   },
 
@@ -77,7 +80,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           set({ user, isAuthenticated: true });
 
           // Re-upload public key on session restore (ensures key is synced)
-          exportPublicKey()
+          exportPublicKey(user.id)
             .then((pubKey) => userApi.uploadPublicKey(pubKey))
             .catch(() => {});
 

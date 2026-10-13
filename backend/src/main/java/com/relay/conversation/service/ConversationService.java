@@ -15,8 +15,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -26,6 +29,7 @@ public class ConversationService {
     private final ConversationRepository conversationRepository;
     private final ConversationMemberRepository memberRepository;
     private final UserRepository userRepository;
+    private final com.relay.message.repository.MessageRepository messageRepository;
 
     @Transactional
     public ConversationResponse createConversation(UserPrincipal principal, CreateConversationRequest request) {
@@ -71,15 +75,54 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public List<ConversationResponse> getUserConversations(UserPrincipal principal) {
-        return conversationRepository.findAllByUserId(principal.getId()).stream()
-                .map(ConversationResponse::from)
+        List<ConversationMember> userMemberships = memberRepository.findByUserId(principal.getId());
+        Map<UUID, Long> lastReadMap = userMemberships.stream()
+                .collect(Collectors.toMap(
+                        ConversationMember::getConversationId,
+                        m -> m.getLastReadSequence() != null ? m.getLastReadSequence() : 0L,
+                        (a, b) -> Math.max(a, b)
+                ));
+
+        List<Conversation> conversations = conversationRepository.findAllByUserId(principal.getId());
+
+        return conversations.stream()
+                .map(conv -> {
+                    long lastRead = lastReadMap.getOrDefault(conv.getId(), 0L);
+                    long unread = messageRepository.countUnreadMessages(conv.getId(), lastRead, principal.getId());
+                    return ConversationResponse.from(conv, unread);
+                })
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public ConversationResponse getConversation(UserPrincipal principal, UUID conversationId) {
         Conversation conversation = getConversationAndVerifyMembership(conversationId, principal.getId());
-        return ConversationResponse.from(conversation);
+        long lastReadSeq = memberRepository.findByConversationIdAndUserId(conversationId, principal.getId())
+                .map(m -> m.getLastReadSequence() != null ? m.getLastReadSequence() : 0L)
+                .orElse(0L);
+        long unread = messageRepository.countUnreadMessages(
+                conversation.getId(), lastReadSeq, principal.getId());
+        return ConversationResponse.from(conversation, unread);
+    }
+
+    @Transactional
+    public void markAsRead(UserPrincipal principal, UUID conversationId) {
+        Conversation conversation = getConversationAndVerifyMembership(conversationId, principal.getId());
+        ConversationMember member = memberRepository
+                .findByConversationIdAndUserId(conversationId, principal.getId())
+                .orElseThrow(() -> ApiException.notFound("ConversationMember", conversationId + "/" + principal.getId()));
+
+        // RACE CONDITION FIX: Use actual max sequence from messages table instead of
+        // conversation.getNextSequence() - 1. The nextSequence counter is incremented
+        // atomically on insert, but there's a window between reading it and saving
+        // the member where another message could be inserted, causing the user to
+        // mark as read up to a sequence that doesn't include the latest message.
+        Long maxSeq = messageRepository.findMaxSequenceNumber(conversationId);
+        long latestSeq = maxSeq != null ? maxSeq : 0L;
+
+        member.setLastReadSequence(latestSeq);
+        memberRepository.saveAndFlush(member);
+        log.debug("Marked conversation {} as read up to sequence {} for user {}", conversationId, latestSeq, principal.getId());
     }
 
     @Transactional
@@ -147,6 +190,9 @@ public class ConversationService {
                 .user(user)
                 .role(role)
                 .build();
-        memberRepository.save(member);
+        member = memberRepository.save(member);
+        if (conversation.getMembers() != null) {
+            conversation.getMembers().add(member);
+        }
     }
 }

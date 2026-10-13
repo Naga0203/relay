@@ -1,16 +1,26 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
 const api = axios.create({
-  baseURL: '/api/v1',
-  headers: { 'Content-Type': 'application/json' },
+  baseURL: API_BASE_URL,
 });
 
-// Request interceptor — attach access token
+// Request interceptor — attach access token and preserve multipart boundary for FormData
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('accessToken');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // When payload is FormData, do NOT send application/json; let the browser/axios set multipart/form-data with boundary
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+    delete config.headers['content-type'];
+    if (typeof (config.headers as any).delete === 'function') {
+      (config.headers as any).delete('Content-Type');
+      (config.headers as any).delete('content-type');
+    }
   }
   return config;
 });
@@ -51,7 +61,7 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refreshToken');
       if (refreshToken) {
         try {
-          const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken });
+          const { data } = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken });
 
           // ARCH FIX (§12c): Route token updates through the Zustand store action
           // instead of writing to localStorage directly.  This keeps in-memory state

@@ -3,40 +3,36 @@ spring:
     name: relay-chat
 
   datasource:
-    url: jdbc:h2:mem:relay_chat;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: ""
-
-  h2:
-    console:
-      enabled: false
+    url: ${DB_URL:jdbc:mysql://localhost:3306/relay_chat?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
 
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     open-in-view: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.H2Dialect
+        dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
+        type:
+          preferred_uuid_jdbc_type: CHAR
     show-sql: false
 
   flyway:
-    enabled: true
-    locations: classpath:db/migration
-    baseline-on-migrate: true
+    enabled: false
 
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
       timeout: 2000ms
 
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 25MB
+      max-request-size: 25MB
 
   jackson:
     serialization:
@@ -44,7 +40,7 @@ spring:
     default-property-inclusion: non_null
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   error:
     # P2-006 fix: Do NOT expose error messages/stack traces to clients
     include-message: never
@@ -55,17 +51,16 @@ server:
 # JWT Configuration
 app:
   jwt:
-    secret: ${JWT_SECRET:change-me-in-production-secret-key-at-least-32-bytes-long}
-    access-token-expiration-ms: 900000      # 15 minutes
-    refresh-token-expiration-ms: 604800000   # 7 days
+    secret: ${JWT_SECRET:c2VjdXJlLXJlbGF5LWNoYXQtc3ByaW5nYm9vdC1qd3Qtc2VjcmV0LWtleS1leGFtcGxlLTI1NmJpdA==}
+    access-token-expiration-ms: ${JWT_EXPIRATION_MS:900000}      # 15 minutes
+    refresh-token-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}   # 7 days
   cors:
-    allowed-origins: "http://localhost:5173"
-  frontend-url: "http://localhost:5173"
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
   security:
     # SECURITY FIX (§2): Comma-separated list of trusted reverse-proxy CIDRs.
     # X-Forwarded-For is ONLY consulted when the direct peer IP is in this list.
     # Empty (default) = never trust XFF, always use remoteAddr directly.
-    # Example for a typical private-network LB: "10.0.0.0/8, 172.16.0.0/12"
     trusted-proxies: ""
 
 # Actuator — minimal exposure
@@ -78,7 +73,7 @@ management:
     health:
       show-details: when_authorized
 
-# P2-011 fix: Security logging at WARN in default profile (not DEBUG)
+# Logging
 logging:
   level:
     com.relay: INFO
@@ -87,23 +82,7 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
 ---
-# Profile for PostgreSQL (Docker)
-spring:
-  config:
-    activate:
-      on-profile: postgres
-  datasource:
-    url: jdbc:postgresql://localhost:5432/relay_chat
-    username: ${DB_USERNAME:relay}
-    password: ${DB_PASSWORD:relay_secret}
-    driver-class-name: org.postgresql.Driver
-  jpa:
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
-
----
-# Dev profile — enables DEBUG logging and data seeding
+# Dev profile — enables DEBUG logging
 spring:
   config:
     activate:

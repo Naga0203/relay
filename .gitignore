@@ -14,6 +14,7 @@
 # IDE and Editor files
 .vscode/
 .idea/
+.claude/
 *.swp
 *.cls
 
@@ -27,3 +28,14 @@ uploads/
 
 # Logs
 *.log
+
+# Environments
+.env
+**/.env
+!.env.example
+!**/.env.example
+
+# Local tools & database dumps
+redis/
+*.rdb
+

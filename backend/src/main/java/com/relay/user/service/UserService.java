@@ -34,6 +34,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PublicKeyAuditLogRepository auditLogRepository;
+    private final com.relay.file.service.FileStorageService fileStorageService;
 
     /** SECURITY FIX (§8): Maximum key changes allowed per rate-limit window. */
     private static final int  KEY_CHANGE_RATE_LIMIT  = 1;
@@ -52,8 +53,16 @@ public class UserService {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> ApiException.notFound("User", principal.getId()));
 
-        if (request.name() != null) {
-            user.setName(request.name());
+        if (request.name() != null && !request.name().trim().isEmpty()) {
+            user.setName(request.name().trim());
+        }
+        if (request.username() != null && !request.username().trim().isEmpty()) {
+            String newUsername = request.username().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!newUsername.equalsIgnoreCase(user.getUsername()) &&
+                userRepository.existsByUsernameIgnoreCaseAndIdNot(newUsername, principal.getId())) {
+                throw ApiException.conflict("Username already taken");
+            }
+            user.setUsername(newUsername);
         }
         if (request.avatarUrl() != null) {
             user.setAvatarUrl(request.avatarUrl());
@@ -66,9 +75,29 @@ public class UserService {
         return UserResponse.from(user);
     }
 
+    @Transactional
+    public UserResponse updateAvatar(UserPrincipal principal, org.springframework.web.multipart.MultipartFile file) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> ApiException.notFound("User", principal.getId()));
+
+        String storedFileName = fileStorageService.storeAvatar(file);
+        String avatarUrl = "/api/v1/files/" + storedFileName;
+        user.setAvatarUrl(avatarUrl);
+        user = userRepository.save(user);
+        log.info("User {} updated avatar: {}", principal.getId(), avatarUrl);
+        return UserResponse.from(user);
+    }
+
     @Transactional(readOnly = true)
     public List<UserSearchResponse> searchUsers(String query) {
-        return userRepository.searchByNameOrEmail(query, PageRequest.of(0, 20)).stream()
+        String cleanQuery = query != null ? query.trim() : "";
+        if (cleanQuery.startsWith("@")) {
+            cleanQuery = cleanQuery.substring(1).trim();
+        }
+        if (cleanQuery.isEmpty()) {
+            return List.of();
+        }
+        return userRepository.searchByNameOrEmail(cleanQuery, PageRequest.of(0, 20)).stream()
                 .map(UserSearchResponse::from)
                 .toList();
     }
@@ -88,13 +117,24 @@ public class UserService {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> ApiException.notFound("User", principal.getId()));
 
-        // Rate-limit check.
-        Instant windowStart = Instant.now().minusSeconds(KEY_CHANGE_WINDOW_SECS);
-        long recentChanges  = auditLogRepository.countByUserIdSince(principal.getId(), windowStart);
-        if (recentChanges >= KEY_CHANGE_RATE_LIMIT) {
-            log.warn("[SECURITY] Key-upload rate limit hit for user {}", principal.getId());
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Public key can only be changed once per hour. Please try again later.");
+        // If the public key is identical to the current one, do nothing (idempotent).
+        // This avoids rejecting page reloads / session restores under the rate limit.
+        if (newPublicKey != null && newPublicKey.equals(user.getPublicKey())) {
+            log.debug("Public key upload is idempotent for user {} — skipping update", principal.getId());
+            return;
+        }
+
+        // Rate-limit check (exempt loopback/localhost for development & local testing).
+        String clientIp = resolveClientIp();
+        boolean isLoopback = "127.0.0.1".equals(clientIp) || "0:0:0:0:0:0:0:1".equals(clientIp) || "::1".equals(clientIp);
+        if (!isLoopback) {
+            Instant windowStart = Instant.now().minusSeconds(KEY_CHANGE_WINDOW_SECS);
+            long recentChanges  = auditLogRepository.countByUserIdSince(principal.getId(), windowStart);
+            if (recentChanges >= KEY_CHANGE_RATE_LIMIT) {
+                log.warn("[SECURITY] Key-upload rate limit hit for user {}", principal.getId());
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                        "Public key can only be changed once per hour. Please try again later.");
+            }
         }
 
         String oldKeyHash = user.getPublicKey() != null ? sha256Hex(user.getPublicKey()) : null;

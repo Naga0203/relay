@@ -58,4 +58,12 @@ public class ConversationController {
         conversationService.removeMember(principal, id, userId);
         return ResponseEntity.noContent().build();
     }
+
+    @PostMapping("/{id}/read")
+    public ResponseEntity<Void> markAsRead(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID id) {
+        conversationService.markAsRead(principal, id);
+        return ResponseEntity.noContent().build();
+    }
 }

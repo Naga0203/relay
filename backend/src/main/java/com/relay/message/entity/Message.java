@@ -65,6 +65,6 @@ public class Message {
     }
 
     public enum MessageType {
-        TEXT, IMAGE, GIF, FILE, SYSTEM
+        TEXT, IMAGE, GIF, FILE, VIDEO, SYSTEM
     }
 }
